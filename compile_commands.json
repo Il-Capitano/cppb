@@ -1,0 +1,112 @@
+[
+    {
+        "directory": "C:/dev/projects/cppb",
+        "file": "C:/dev/projects/cppb/src/config.cpp",
+        "arguments": [
+            "-c",
+            "-g",
+            "-std=c++20",
+            "-Weverything",
+            "-Wno-c++98-compat",
+            "-Wno-ctad-maybe-unsupported",
+            "-Wno-padded",
+            "-Wno-global-constructors",
+            "-Wno-exit-time-destructors",
+            "-Wno-weak-vtables",
+            "-Wno-c++98-compat-pedantic",
+            "-Wno-unused-template",
+            "-O0",
+            "-o",
+            "bin/windows-debug/int/config.cpp.o",
+            "C:/dev/projects/cppb/src/config.cpp"
+        ]
+    },
+    {
+        "directory": "C:/dev/projects/cppb",
+        "file": "C:/dev/projects/cppb/src/ctcli/ctcli.cpp",
+        "arguments": [
+            "-c",
+            "-g",
+            "-std=c++20",
+            "-Weverything",
+            "-Wno-c++98-compat",
+            "-Wno-ctad-maybe-unsupported",
+            "-Wno-padded",
+            "-Wno-global-constructors",
+            "-Wno-exit-time-destructors",
+            "-Wno-weak-vtables",
+            "-Wno-c++98-compat-pedantic",
+            "-Wno-unused-template",
+            "-O0",
+            "-o",
+            "bin/windows-debug/int/ctcli.cpp.o",
+            "C:/dev/projects/cppb/src/ctcli/ctcli.cpp"
+        ]
+    },
+    {
+        "directory": "C:/dev/projects/cppb",
+        "file": "C:/dev/projects/cppb/src/process.cpp",
+        "arguments": [
+            "-c",
+            "-g",
+            "-std=c++20",
+            "-Weverything",
+            "-Wno-c++98-compat",
+            "-Wno-ctad-maybe-unsupported",
+            "-Wno-padded",
+            "-Wno-global-constructors",
+            "-Wno-exit-time-destructors",
+            "-Wno-weak-vtables",
+            "-Wno-c++98-compat-pedantic",
+            "-Wno-unused-template",
+            "-O0",
+            "-o",
+            "bin/windows-debug/int/process.cpp.o",
+            "C:/dev/projects/cppb/src/process.cpp"
+        ]
+    },
+    {
+        "directory": "C:/dev/projects/cppb",
+        "file": "C:/dev/projects/cppb/src/analyze.cpp",
+        "arguments": [
+            "-c",
+            "-g",
+            "-std=c++20",
+            "-Weverything",
+            "-Wno-c++98-compat",
+            "-Wno-ctad-maybe-unsupported",
+            "-Wno-padded",
+            "-Wno-global-constructors",
+            "-Wno-exit-time-destructors",
+            "-Wno-weak-vtables",
+            "-Wno-c++98-compat-pedantic",
+            "-Wno-unused-template",
+            "-O0",
+            "-o",
+            "bin/windows-debug/int/analyze.cpp.o",
+            "C:/dev/projects/cppb/src/analyze.cpp"
+        ]
+    },
+    {
+        "directory": "C:/dev/projects/cppb",
+        "file": "C:/dev/projects/cppb/src/main.cpp",
+        "arguments": [
+            "-c",
+            "-g",
+            "-std=c++20",
+            "-Weverything",
+            "-Wno-c++98-compat",
+            "-Wno-ctad-maybe-unsupported",
+            "-Wno-padded",
+            "-Wno-global-constructors",
+            "-Wno-exit-time-destructors",
+            "-Wno-weak-vtables",
+            "-Wno-c++98-compat-pedantic",
+            "-Wno-unused-template",
+            "-O0",
+            "-o",
+            "bin/windows-debug/int/main.cpp.o",
+            "C:/dev/projects/cppb/src/main.cpp"
+        ]
+    }
+]

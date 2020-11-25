@@ -1,0 +1,49 @@
+{
+	"default": {
+		"compiler": "clang",
+		"c_standard": "c11",
+		"cpp_standard": "c++20",
+		"emit_compile_commands" : true,
+
+		"c_compiler_flags": [],
+		"cpp_compiler_flags": [],
+		"link_flags": [],
+
+		"run_args": [ "build" ],
+
+		"source_directory": "src",
+
+		"include_paths": [],
+		"library_paths": [],
+		"libraries": [ "fmt" ],
+
+		"defines": [],
+		"warnings": [
+			"everything",
+			"no-c++98-compat",
+			"no-ctad-maybe-unsupported",
+			"no-padded",
+			"no-global-constructors",
+			"no-exit-time-destructors",
+			"no-weak-vtables",
+			"no-c++98-compat-pedantic",
+			"no-unused-template"
+		],
+
+		"configs": {
+			"windows-debug": {},
+			"windows-release": {},
+			"linux-debug": {},
+			"linux-release": {},
+			"windows": {},
+			"linux": {},
+			"debug": {
+				"optimization": "0"
+			},
+			"release": {
+				"defines": [ "NDEBUG" ],
+				"optimization": "3"
+			}
+		}
+	}
+}
