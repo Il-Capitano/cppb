@@ -1,0 +1,5 @@
+bin
+.cppb/dependencies
+.vscode
+.cache
+compile_commands.json
