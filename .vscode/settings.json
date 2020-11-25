@@ -1,9 +1,0 @@
-{
-	"files.associations": {
-		"span": "cpp",
-		"memory": "cpp",
-		"variant": "cpp",
-		"string_view": "cpp",
-		"typeinfo": "cpp"
-	}
-}
