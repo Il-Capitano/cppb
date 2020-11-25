@@ -1,0 +1,4 @@
+bin
+.cppb/dependencies
+.vscode
+.cache
