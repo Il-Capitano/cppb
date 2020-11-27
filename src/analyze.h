@@ -25,7 +25,8 @@ void analyze_source_files(
 	cppb::vector<fs::path> const &files,
 	cppb::vector<fs::path> const &include_directories,
 	cppb::vector<source_file> &sources,
-	fs::file_time_type dependency_file_last_update = fs::file_time_type::min()
+	fs::file_time_type dependency_file_last_update,
+	fs::file_time_type config_last_update
 );
 
 void fill_last_modified_times(cppb::vector<source_file> &sources);

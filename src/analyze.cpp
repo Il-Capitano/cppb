@@ -293,11 +293,16 @@ void analyze_source_files(
 	cppb::vector<fs::path> const &files,
 	cppb::vector<fs::path> const &include_directories,
 	cppb::vector<source_file> &sources,
-	fs::file_time_type dependency_file_last_update
+	fs::file_time_type dependency_file_last_update,
+	fs::file_time_type config_last_update
 )
 {
 	auto non_updated_sources = sources
-		.filter([&](auto const &source) { return source.last_modified_time < dependency_file_last_update; })
+		.filter([&](auto const &source) {
+			return fs::exists(source.file_path)
+				&& source.last_modified_time < dependency_file_last_update
+				&& config_last_update < dependency_file_last_update;
+		})
 		.collect<cppb::vector>();
 	cppb::vector<std::size_t> hashes = non_updated_sources
 		.transform([](auto const &source) { return fs::hash_value(source.file_path); })

@@ -38,7 +38,7 @@ static cppb::vector<std::string> get_compiler_args(config const &build_config, s
 	return args;
 }
 
-static int build_project(project_config const &project_config)
+static int build_project(project_config const &project_config, fs::file_time_type config_last_update)
 {
 	std::string error;
 
@@ -124,7 +124,8 @@ static int build_project(project_config const &project_config)
 		source_files,
 		fs::exists(dependency_file_path)
 			? fs::last_write_time(dependency_file_path)
-			: fs::file_time_type::min()
+			: fs::file_time_type::min(),
+		config_last_update
 	);
 	write_dependency_json(dependency_file_path, source_files);
 
@@ -245,9 +246,10 @@ static int build_project(project_config const &project_config)
 
 
 			if (
+				auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
 				ctcli::option_value<ctcli::option("build --rebuild")>
-				|| !fs::exists(object_file)
-				|| fs::last_write_time(object_file) < source.last_modified_time
+				|| object_last_write_time < source.last_modified_time
+				|| object_last_write_time < config_last_update
 			)
 			{
 				auto const source_file_name = source_file.generic_string();
@@ -321,9 +323,10 @@ static int build_project(project_config const &project_config)
 			auto const &object_file = object_files.back();
 
 			if (
+				auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
 				ctcli::option_value<ctcli::option("build --rebuild")>
-				|| !fs::exists(object_file)
-				|| fs::last_write_time(object_file) < source.last_modified_time
+				|| object_last_write_time < source.last_modified_time
+				|| object_last_write_time < config_last_update
 			)
 			{
 				auto const source_file_name = source_file.generic_string();
@@ -564,7 +567,7 @@ int main(int argc, char const **argv)
 			}
 			return *it;
 		}();
-		return build_project(project_config);
+		return build_project(project_config, fs::last_write_time(config_file_path));
 	}
 	else if (ctcli::is_command_set<ctcli::command("run")>())
 	{
@@ -596,7 +599,7 @@ int main(int argc, char const **argv)
 			}
 			return *it;
 		}();
-		auto const build_result = build_project(project_config);
+		auto const build_result = build_project(project_config, fs::last_write_time(config_file_path));
 		if (build_result != 0)
 		{
 			return build_result;
