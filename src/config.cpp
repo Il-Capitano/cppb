@@ -461,6 +461,7 @@ R"({
 		"c_compiler_flags": [],
 		"cpp_compiler_flags": [],
 		"link_flags": [],
+		"emit_compile_commands": true,
 
 		"run_args": [],
 

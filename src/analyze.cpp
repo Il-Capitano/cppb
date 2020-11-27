@@ -1,5 +1,4 @@
 #include "analyze.h"
-#include <iostream>
 #include <bits/fs_path.h>
 #include <compare>
 #include <filesystem>
@@ -256,21 +255,6 @@ static void add_source_file(
 		auto const source_files_end = source_files.end();
 		for (; source_files_it != source_files_end; ++source_files_it, ++hashes_it)
 		{
-			if (source_files_it->file_path == source_ && *hashes_it != hash_)
-			{
-				std::cout << '|';
-				for (auto const &c : source_files_it->file_path)
-				{
-					std::cout << c << '|';
-				}
-				std::cout << " == ";
-				std::cout << '|';
-				for (auto const &c : source_)
-				{
-					std::cout << c << '|';
-				}
-				std::cout << '\n';
-			}
 			if (*hashes_it == hash_ && source_files_it->file_path == source_)
 			{
 				return source_files_it;
