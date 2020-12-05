@@ -26,7 +26,14 @@ static cppb::vector<std::string> get_compiler_args(config const &build_config, s
 	{
 		args.emplace_back("-g");
 	}
-	add_cpp_compiler_flags(args, build_config);
+	if (source_file_name.ends_with(".c"))
+	{
+		add_c_compiler_flags(args, build_config);
+	}
+	else
+	{
+		add_cpp_compiler_flags(args, build_config);
+	}
 	for (auto const positional_arg : ctcli::positional_arguments<ctcli::command("build")>)
 	{
 		args.emplace_back(positional_arg);

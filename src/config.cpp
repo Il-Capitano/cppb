@@ -390,6 +390,10 @@ void add_c_compiler_flags(std::vector<std::string> &args, config const &config)
 	case compiler_kind::gcc:
 	case compiler_kind::clang:
 		args.emplace_back(fmt::format("-std={}", config.c_standard));
+		for (auto const &flag : config.c_compiler_flags)
+		{
+			args.emplace_back(flag);
+		}
 		for (auto const &include_path : config.include_paths)
 		{
 			args.emplace_back(fmt::format("-I{}", include_path.generic_string()));
@@ -414,6 +418,10 @@ void add_cpp_compiler_flags(std::vector<std::string> &args, config const &config
 	case compiler_kind::gcc:
 	case compiler_kind::clang:
 		args.emplace_back(fmt::format("-std={}", config.cpp_standard));
+		for (auto const &flag : config.cpp_compiler_flags)
+		{
+			args.emplace_back(flag);
+		}
 		for (auto const &include_path : config.include_paths)
 		{
 			args.emplace_back(fmt::format("-I{}", include_path.generic_string()));
