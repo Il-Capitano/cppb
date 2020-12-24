@@ -1,4 +1,5 @@
 bin
+.clangd
 .cppb/dependencies
 .vscode
 .cache

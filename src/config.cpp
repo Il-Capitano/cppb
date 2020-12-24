@@ -221,7 +221,7 @@ static project_config make_project_config(std::string_view name, rapidjson::Valu
 		{
 			if (!debug_it->value.IsObject())
 			{
-				error = "value of member 'windows' in configuration file must be an 'Object'";
+				error = "value of member 'debug' in configuration file must be an 'Object'";
 				return {};
 			}
 			fill_config(debug_it->value.GetObject(), result.windows_debug, result_is_set.windows_debug, error);
@@ -239,7 +239,7 @@ static project_config make_project_config(std::string_view name, rapidjson::Valu
 		{
 			if (!release_it->value.IsObject())
 			{
-				error = "value of member 'linux' in configuration file must be an 'Object'";
+				error = "value of member 'release' in configuration file must be an 'Object'";
 				return {};
 			}
 			fill_config(release_it->value.GetObject(), result.windows_release, result_is_set.windows_release, error);
@@ -363,9 +363,12 @@ cppb::vector<project_config> read_config_json(fs::path const &dep_file_path, std
 
 	cppb::vector<project_config> result{};
 
-	auto const &object = d.GetObject();
-	for (auto const &member : object)
+	auto const object = d.GetObject();
+	auto const begin = object.begin();
+	auto const end   = object.end();
+	for (auto it = begin; it.operator->() != end.operator->(); ++it)
 	{
+		auto const &member = *it;
 		assert(member.name.IsString());
 		std::string_view const name = member.name.GetString();
 		if (!member.value.IsObject())
@@ -452,6 +455,10 @@ void add_link_flags(std::vector<std::string> &args, config const &config)
 		for (auto const &library : config.libraries)
 		{
 			args.emplace_back(fmt::format("-l{}", library));
+		}
+		for (auto const &flag : config.link_flags)
+		{
+			args.emplace_back(flag);
 		}
 		break;
 	}

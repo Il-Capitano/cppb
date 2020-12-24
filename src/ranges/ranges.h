@@ -108,6 +108,14 @@ struct collection_base_max
 	auto max(T &&initial_value) const noexcept;
 };
 
+template<typename Collection>
+struct collection_base_sort
+{
+	void sort(void) noexcept;
+	template<typename Cmp>
+	void sort(Cmp &&cmp) noexcept;
+};
+
 } // namespace detail
 
 
@@ -129,7 +137,8 @@ struct collection_base :
 	detail::collection_base_is_any   <Collection>,
 	detail::collection_base_for_each <Collection>,
 	detail::collection_base_sum      <Collection>,
-	detail::collection_base_max      <Collection>
+	detail::collection_base_max      <Collection>,
+	detail::collection_base_sort     <Collection>
 {
 	auto as_range(void) const noexcept;
 };
@@ -561,6 +570,21 @@ template<typename Collection>
 template<typename T>
 auto collection_base_max<Collection>::max(T &&initial_value) const noexcept
 { return static_cast<Collection const *>(this)->as_range().sum(std::forward<T>(initial_value)); }
+
+template<typename Collection>
+void collection_base_sort<Collection>::sort(void) noexcept
+{
+	auto const self = static_cast<Collection const *>(this);
+	std::sort(self->begin(), self->end());
+}
+
+template<typename Collection>
+template<typename Cmp>
+void collection_base_sort<Collection>::sort(Cmp &&cmp) noexcept
+{
+	auto const self = static_cast<Collection *>(this);
+	std::sort(self->begin(), self->end(), std::forward<Cmp>(cmp));
+}
 
 } // namespace detail
 

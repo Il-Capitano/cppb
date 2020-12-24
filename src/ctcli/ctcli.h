@@ -35,8 +35,111 @@
 namespace ctcli
 {
 
+#if __cplusplus < 202002L
+
+struct string_view : std::string_view
+{
+	using std::string_view::string_view;
+
+	constexpr string_view(std::string_view str)
+		: std::string_view(str)
+	{}
+
+	constexpr string_view(char const *begin, char const *end)
+		: std::string_view(begin, static_cast<std::size_t>(end - begin))
+	{}
+
+	constexpr bool starts_with(char c) const noexcept
+	{
+		return !this->empty() && this->front() == c;
+	}
+
+	constexpr bool starts_with(string_view str) const noexcept
+	{
+		if (this->size() < str.size())
+		{
+			return false;
+		}
+		auto it = this->begin();
+		auto str_it = str.begin();
+		auto str_end = str.end();
+		for (; str_it != str_end; ++str_it, ++it)
+		{
+			if (*it != *str_it)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	constexpr bool ends_with(string_view str) const noexcept
+	{
+		if (this->size() < str.size())
+		{
+			return false;
+		}
+		auto it = this->begin() + (this->size() - str.size());
+		auto str_it = str.begin();
+		auto str_end = str.end();
+		for (; str_it != str_end; ++str_it, ++it)
+		{
+			if (*it != *str_it)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	constexpr bool ends_with(char c) const noexcept
+	{
+		return !this->empty() && this->back() == c;
+	}
+
+	constexpr string_view substr(size_type pos = 0, size_type count = npos) const noexcept
+	{
+		return string_view(this->std::string_view::substr(pos, count));
+	}
+};
+
+struct string : std::string
+{
+	using std::string::string;
+
+	string(std::string const &str)
+		: std::string(str)
+	{}
+
+	string(std::string &&str)
+		: std::string(std::move(str))
+	{}
+
+	bool starts_with(char c) const noexcept
+	{ return string_view(*this).starts_with(c); }
+
+	bool starts_with(string_view str) const noexcept
+	{ return string_view(*this).starts_with(str); }
+
+	bool ends_with(string_view str) const noexcept
+	{ return string_view(*this).ends_with(str); }
+
+	bool ends_with(char c) const noexcept
+	{ return string_view(*this).ends_with(c); }
+
+	operator string_view(void) const noexcept
+	{ return string_view(std::string_view(*this)); }
+};
+
+#else
+
 using string      = std::string;
 using string_view = std::string_view;
+
+#endif // c++20
+
+using std_string = std::string;
+using std_string_view = std::string_view;
 
 template<typename T, std::size_t N>
 using array = std::array<T, N>;
@@ -431,7 +534,18 @@ constexpr std::pair<string_view, string_view> get_flag_names_with_equals(string_
 /// Returns whether the `c` is contained in `str`
 constexpr bool string_contains(string_view str, char_type c)
 {
+#if __cplusplus < 202002L
+	for (auto const str_c : str)
+	{
+		if (c == str_c)
+		{
+			return true;
+		}
+	}
+	return false;
+#else
 	return std::find(str.begin(), str.end(), c) != str.end();
+#endif // c++20
 }
 
 /// Returns whether `usage` is a simple bool flag (e.g. '-h, --help')
@@ -586,7 +700,7 @@ static_assert(sizeof (double) == 8);
 CTCLI_DEF_ARG_TYPE_T(float32, float);
 CTCLI_DEF_ARG_TYPE_T(float64, double);
 
-CTCLI_DEF_ARG_TYPE_T(string, string_view);
+CTCLI_DEF_ARG_TYPE_T(string, std_string_view);
 
 #undef CL_DEF_ARG_TYPE_T
 
@@ -1358,7 +1472,22 @@ constexpr std::pair<string_view, string_view> seperate_option_and_group_element(
 
 constexpr std::pair<string_view, string_view> seperate_command_and_option(string_view flag_name)
 {
+#if __cplusplus < 202002L
+	auto const space_it = [&]() {
+		auto it = flag_name.begin();
+		auto const end = flag_name.end();
+		for (; it != end; ++it)
+		{
+			if (*it == ' ')
+			{
+				return it;
+			}
+		}
+		return end;
+	}();
+#else
 	auto const space_it = std::find(flag_name.begin(), flag_name.end(), ' ');
+#endif // c++20
 	if (space_it == flag_name.end())
 	{
 		return { string_view{}, flag_name };
@@ -1716,11 +1845,11 @@ struct command_value_type
 template<typename T>
 struct group_element_value_storage_t
 {
-	T           element_value{};
-	std::size_t flag_position{0};
-	string_view group_flag_value{};
-	string_view flag_value{};
-	string_view arg_value{};
+	T               element_value{};
+	std::size_t     flag_position{0};
+	std_string_view group_flag_value{};
+	std_string_view flag_value{};
+	std_string_view arg_value{};
 };
 
 /// The type, where options values are stored alongside its
@@ -1728,10 +1857,10 @@ struct group_element_value_storage_t
 template<typename T>
 struct option_value_storage_t
 {
-	T           option_value{};
-	std::size_t flag_position{0};
-	string_view flag_value{};
-	string_view arg_value{};
+	T               option_value{};
+	std::size_t     flag_position{0};
+	std_string_view flag_value{};
+	std_string_view arg_value{};
 };
 
 constexpr optional<string_view> get_default_value_arg(string_view help) noexcept
@@ -2896,7 +3025,7 @@ inline bool compare_usages(string_view lhs, string_view rhs)
 	return alphabetical_compare(lhs_actual, rhs_actual);
 }
 
-std::string get_help_string(
+string get_help_string(
 	vector<string> const &usages,
 	vector<string> const &helps,
 	std::size_t initial_indent_width,

@@ -28,7 +28,7 @@ static int run_process(std::string command, output_kind output)
 	{
 		si.dwFlags |= STARTF_USESTDHANDLES;
 		si.hStdOutput = GetStdHandle(STD_ERROR_HANDLE);
-		si.hStdError = si.hStdInput;
+		si.hStdError = si.hStdOutput;
 	}
 	else if (output == output_kind::null_)
 	{
@@ -97,7 +97,7 @@ static int run_process(std::string command, output_kind output)
 	}
 	else if (output == output_kind::null_)
 	{
-		command += " > /dev/null";
+		command += " > /dev/null 2>&1";
 	}
 
 	return std::system(command.c_str());

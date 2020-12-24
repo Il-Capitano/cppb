@@ -17,6 +17,11 @@ static void report_error(std::string_view site, std::string_view message)
 	fmt::print(stderr, "{}\n", message);
 }
 
+static bool ends_with(std::string_view str, std::string_view pattern)
+{
+	return ctcli::string_view(str).ends_with(pattern);
+}
+
 static cppb::vector<std::string> get_compiler_args(config const &build_config, std::string source_file_name, std::string object_file_name)
 {
 	cppb::vector<std::string> args;
@@ -26,7 +31,7 @@ static cppb::vector<std::string> get_compiler_args(config const &build_config, s
 	{
 		args.emplace_back("-g");
 	}
-	if (source_file_name.ends_with(".c"))
+	if (ends_with(source_file_name, ".c"))
 	{
 		add_c_compiler_flags(args, build_config);
 	}
@@ -362,6 +367,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 
 	if (compile_commands.size() != 0)
 	{
+		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
 		write_compile_commands_json(compile_commands);
 	}
 

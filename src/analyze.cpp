@@ -129,7 +129,7 @@ static cppb::vector<include_file> get_includes(fs::path const &file_path)
 			++it;
 		}
 		auto const directive_end = it;
-		auto const directive_name = std::string_view(directive_begin, directive_end);
+		auto const directive_name = std::string_view(&*directive_begin, static_cast<std::size_t>(directive_end - directive_begin));
 		return directive_name == "include";
 	};
 
@@ -424,8 +424,12 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 	cppb::vector<source_file> result;
 
 	auto object = d.GetObject();
-	for (auto const &member : object)
+	// bullshit iteration because of C++20 breaking things with operator <=>
+	auto const begin = object.begin();
+	auto const end   = object.end();
+	for (auto it = begin; it.operator->() != end.operator->(); ++it)
 	{
+		auto const &member = *it;
 		assert(member.name.IsString());
 		std::string_view const name = member.name.GetString();
 		if (!member.value.IsArray())
@@ -494,6 +498,7 @@ void write_compile_commands_json(cppb::vector<compile_command> const &compile_co
 	std::ofstream output("./compile_commands.json");
 	if (!output.is_open())
 	{
+		fmt::print("error while writing compile_commands.json");
 		return;
 	}
 

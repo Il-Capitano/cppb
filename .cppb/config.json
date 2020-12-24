@@ -27,7 +27,8 @@
 			"no-exit-time-destructors",
 			"no-weak-vtables",
 			"no-c++98-compat-pedantic",
-			"no-unused-template"
+			"no-unused-template",
+			"no-zero-as-null-pointer-constant"
 		],
 
 		"configs": {
@@ -36,7 +37,10 @@
 			"linux-debug": {},
 			"linux-release": {},
 			"windows": {},
-			"linux": {},
+			"linux": {
+				"cpp_standard": "c++17",
+				"libraries": [ "pthread" ]
+			},
 			"debug": {
 				"optimization": "0"
 			},
