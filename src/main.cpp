@@ -22,6 +22,17 @@ static bool ends_with(std::string_view str, std::string_view pattern)
 	return ctcli::string_view(str).ends_with(pattern);
 }
 
+static void print_command(std::string_view executable, cppb::vector<std::string> const &arguments)
+{
+	std::string command{ executable };
+	for (auto const &arg : arguments)
+	{
+		command += ' ';
+		command += arg;
+	}
+	fmt::print("{}\n", command);
+}
+
 static cppb::vector<std::string> get_compiler_args(config const &build_config, std::string source_file_name, std::string object_file_name)
 {
 	cppb::vector<std::string> args;
@@ -285,6 +296,10 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 					compilation_futures.erase(finished);
 				}
 				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), source_file_name);
+				if (ctcli::option_value<ctcli::option("build --verbose")>)
+				{
+					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
+				}
 				compilation_futures.push_back({ i, std::async(&run_command, is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::null_) });
 			}
 			else if (emit_compile_commands)
@@ -350,6 +365,10 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 				}
 
 				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), source_file_name);
+				if (ctcli::option_value<ctcli::option("build --verbose")>)
+				{
+					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
+				}
 				auto const exit_code = run_command(is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::stdout_);
 				if (exit_code != 0)
 				{
@@ -414,6 +433,10 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 		}
 		add_link_flags(link_args, build_config);
 
+		if (ctcli::option_value<ctcli::option("build -v")>)
+		{
+			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
+		}
 		auto const exit_code = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stdout_);
 		if (exit_code != 0)
 		{

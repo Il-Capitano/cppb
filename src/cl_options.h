@@ -9,6 +9,9 @@ constexpr auto run_options   = build_options;
 constexpr auto new_options   = ctcli::options_id_t::_2;
 
 template<>
+inline constexpr bool ctcli::add_verbose_option<build_options> = true;
+
+template<>
 inline constexpr std::array ctcli::command_line_options<build_options> = {
 	ctcli::create_option("--config-file <path>",         "Set configuration file path (default=.cppb/config.json)", ctcli::arg_type::string),
 	ctcli::create_option("--cppb-dir <dir>",             "Set directory used by cppb (default=.cppb)",              ctcli::arg_type::string),

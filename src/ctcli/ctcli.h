@@ -3342,7 +3342,19 @@ void print_options_help(
 			is_verbose,
 			sort_alphabetically
 		);
-		if (is_verbose)
+		auto const needs_additional_help_options_help = [&]() {
+			bool result = false;
+			for (auto const &option : command_line_options<ID>)
+			{
+				if (option.visibility == visibility_kind::hidden)
+				{
+					result = true;
+				}
+			}
+			return result;
+		}();
+
+		if (is_verbose || !needs_additional_help_options_help)
 		{
 			fmt::print(
 				"Usage: {} [options ...] {}\n\nOptions:\n{}",
@@ -3409,7 +3421,19 @@ void print_command_options_help(
 			is_verbose,
 			sort_alphabetically
 		);
-		if (is_verbose)
+		auto const needs_additional_help_options_help = [&]() {
+			bool result = false;
+			for (auto const &option : command_line_options<ID>)
+			{
+				if (option.visibility == visibility_kind::hidden)
+				{
+					result = true;
+				}
+			}
+			return result;
+		}();
+
+		if (is_verbose || !needs_additional_help_options_help)
 		{
 			fmt::print(
 				"Usage: {} {} [options ...] {}\n\nOptions:\n{}",

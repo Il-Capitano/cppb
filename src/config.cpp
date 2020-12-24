@@ -405,10 +405,30 @@ void add_c_compiler_flags(std::vector<std::string> &args, config const &config)
 		{
 			args.emplace_back(fmt::format("-D{}", define));
 		}
-		for (auto const &warning : config.warnings)
+
 		{
-			args.emplace_back(fmt::format("-W{}", warning));
+			auto warning_indicies = ranges::iota(std::size_t(0), config.warnings.size()).collect<cppb::vector>();
+			std::sort(
+				warning_indicies.begin(), warning_indicies.end(),
+				[&](auto const lhs, auto const rhs) {
+					auto const lhs_starts_with = std::string_view(config.warnings[lhs]).substr(0, 3) == "no-";
+					auto const rhs_starts_with = std::string_view(config.warnings[rhs]).substr(0, 3) == "no-";
+					if (lhs_starts_with != rhs_starts_with)
+					{
+						return lhs_starts_with ? false : true;
+					}
+					else
+					{
+						return lhs < rhs;
+					}
+				}
+			);
+			for (auto const i : warning_indicies)
+			{
+				args.emplace_back(fmt::format("-W{}", config.warnings[i]));
+			}
 		}
+
 		args.emplace_back(fmt::format("-O{}", config.optimization));
 		break;
 	}
@@ -433,10 +453,30 @@ void add_cpp_compiler_flags(std::vector<std::string> &args, config const &config
 		{
 			args.emplace_back(fmt::format("-D{}", define));
 		}
-		for (auto const &warning : config.warnings)
+
 		{
-			args.emplace_back(fmt::format("-W{}", warning));
+			auto warning_indicies = ranges::iota(std::size_t(0), config.warnings.size()).collect<cppb::vector>();
+			std::sort(
+				warning_indicies.begin(), warning_indicies.end(),
+				[&](auto const lhs, auto const rhs) {
+					auto const lhs_starts_with = std::string_view(config.warnings[lhs]).substr(0, 3) == "no-";
+					auto const rhs_starts_with = std::string_view(config.warnings[rhs]).substr(0, 3) == "no-";
+					if (lhs_starts_with != rhs_starts_with)
+					{
+						return lhs_starts_with ? false : true;
+					}
+					else
+					{
+						return lhs < rhs;
+					}
+				}
+			);
+			for (auto const i : warning_indicies)
+			{
+				args.emplace_back(fmt::format("-W{}", config.warnings[i]));
+			}
 		}
+
 		args.emplace_back(fmt::format("-O{}", config.optimization));
 		break;
 	}

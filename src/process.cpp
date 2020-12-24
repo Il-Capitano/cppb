@@ -113,5 +113,6 @@ int run_command(std::string_view executable, cppb::vector<std::string> arguments
 		command += ' ';
 		command += arg;
 	}
+	
 	return run_process(std::move(command), output);
 }
