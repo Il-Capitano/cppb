@@ -150,6 +150,11 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 			: fs::file_time_type::min(),
 		config_last_update
 	);
+	source_files.sort([](auto const &lhs, auto const &rhs) {
+		auto const lhs_size = std::distance(lhs.file_path.begin(), lhs.file_path.end());
+		auto const rhs_size = std::distance(rhs.file_path.begin(), rhs.file_path.end());
+		return lhs_size > rhs_size || (lhs_size == rhs_size && lhs.file_path < rhs.file_path);
+	});
 	write_dependency_json(dependency_file_path, source_files);
 
 	cppb::vector<fs::path> object_files;
@@ -207,9 +212,8 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 	}();
 
 	auto const emit_compile_commands = (
-			(ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
-			&& ctcli::option_value<ctcli::option("build --emit-compile-commands")>)
-			|| build_config.emit_compile_commands
+			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
+			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
 		) && [&]() {
 			fs::path const compile_commands_json = "./compile_commands.json";
 			return !fs::exists(compile_commands_json)

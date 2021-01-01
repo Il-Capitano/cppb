@@ -9,7 +9,7 @@
 		"cpp_compiler_flags": [],
 		"link_flags": [],
 
-		"run_args": [ "build" ],
+		"run_args": [],
 
 		"source_directory": "src",
 
