@@ -432,6 +432,12 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 		auto const &member = *it;
 		assert(member.name.IsString());
 		std::string_view const name = member.name.GetString();
+		auto name_path = fs::path(name).lexically_normal();
+
+		if (!fs::exists(name_path))
+		{
+			continue;
+		}
 		if (!member.value.IsArray())
 		{
 			error = fmt::format("value of member '{}' in dependency file must be an 'Array'", name);
@@ -447,9 +453,13 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 				error = fmt::format("array element in value of member '{}' in dependency file must be a 'String'", name);
 				return {};
 			}
-			dependencies.emplace_back(fs::path(value.GetString()).lexically_normal());
+			auto path = fs::path(value.GetString()).lexically_normal();
+			if (fs::exists(path))
+			{
+				dependencies.emplace_back(std::move(path));
+			}
 		}
-		result.push_back({ fs::path(name).lexically_normal(), std::move(dependencies), fs::file_time_type::min() });
+		result.push_back({ std::move(name_path), std::move(dependencies), fs::file_time_type::min() });
 	}
 
 	return result;

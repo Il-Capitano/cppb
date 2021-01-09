@@ -17,6 +17,13 @@ static void report_error(std::string_view site, std::string_view message)
 	fmt::print(stderr, "{}\n", message);
 }
 
+static void report_warning(std::string_view site, std::string_view message)
+{
+	fmt::print(stderr, fg(fmt::terminal_color::bright_white), "{}: ", site);
+	fmt::print(stderr, fg(fmt::terminal_color::bright_magenta), "warning: ");
+	fmt::print(stderr, "{}\n", message);
+}
+
 static bool ends_with(std::string_view str, std::string_view pattern)
 {
 	return ctcli::string_view(str).ends_with(pattern);
@@ -231,8 +238,8 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 	bool is_any_cpp = false;
 	if (!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
 	{
-		cppb::vector<int> compilation_exit_codes;
-		cppb::vector<std::pair<std::size_t, std::future<int>>> compilation_futures;
+		cppb::vector<process_result> compilation_results;
+		cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
 		auto const is_any_future_finished = [&compilation_futures]() {
 			for (auto const &[index, future] : compilation_futures)
 			{
@@ -255,7 +262,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 			);
 		};
 
-		compilation_exit_codes.resize(compilation_units.size());
+		compilation_results.resize(compilation_units.size());
 
 		// source file compilation
 		for (std::size_t i = 0; i < compilation_units.size(); ++i)
@@ -296,7 +303,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 					}
 					auto const finished = get_finished_future();
 					assert(finished != compilation_futures.end());
-					compilation_exit_codes[finished->first] = finished->second.get();
+					compilation_results[finished->first] = finished->second.get();
 					compilation_futures.erase(finished);
 				}
 				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), source_file_name);
@@ -316,19 +323,55 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 
 		for (auto &[index, future] : compilation_futures)
 		{
-			compilation_exit_codes[index] = future.get();
+			compilation_results[index] = future.get();
 		}
 
 		bool is_good = true;
-		assert(compilation_exit_codes.size() == compilation_units.size());
-		for (std::size_t i = 0; i < compilation_exit_codes.size(); ++i)
+		assert(compilation_results.size() == compilation_units.size());
+		for (std::size_t i = 0; i < compilation_results.size(); ++i)
 		{
-			auto const exit_code = compilation_exit_codes[i];
+			auto const result = compilation_results[i];
 			auto const source_file_name = compilation_units[i].file_path.generic_string();
-			if (exit_code != 0)
+			if (result.exit_code != 0 || result.error_count != 0 || result.warning_count != 0)
 			{
-				is_good = false;
-				report_error(source_file_name, fmt::format("compilation failed with exit code {}; use '-s' to see compiler output", exit_code));
+				is_good = is_good && result.exit_code == 0 && result.error_count == 0;
+				auto const message = [&]() {
+					if (result.error_count != 0 && result.warning_count != 0)
+					{
+						return fmt::format(
+							"compilation failed with {} error{} and {} warning{}; use '-s' to see compiler output",
+							result.error_count, result.error_count == 1 ? "" : "s",
+							result.warning_count, result.warning_count == 1 ? "" : "s"
+						);
+					}
+					else if (result.error_count != 0)
+					{
+						return fmt::format(
+							"compilation failed with {} error{}; use '-s' to see compiler output",
+							result.error_count, result.error_count == 1 ? "" : "s"
+						);
+					}
+					else if (result.warning_count != 0)
+					{
+						return fmt::format(
+							"{} warning{} emitted by compiler; use '-s' to see compiler output",
+							result.warning_count, result.warning_count == 1 ? "" : "s"
+						);
+					}
+					else // if (result.error_count == 0 && result.warning_cont == 0)
+					{
+						// this shouldn't normally happen, but we handle it anyways
+						return fmt::format("compilation failed with exit code {}; use '-s' to see compiler output", result.exit_code);
+					}
+				}();
+				if (result.exit_code != 0 || result.error_count != 0)
+				{
+					report_error(source_file_name, message);
+				}
+				else
+				{
+					report_warning(source_file_name, message);
+				}
 			}
 		}
 
@@ -373,10 +416,10 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 				{
 					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
 				}
-				auto const exit_code = run_command(is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::stdout_);
-				if (exit_code != 0)
+				auto const result = run_command(is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::stderr_);
+				if (result.exit_code != 0)
 				{
-					return exit_code;
+					return 1;
 				}
 			}
 			else if (emit_compile_commands)
@@ -441,10 +484,10 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 		{
 			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
 		}
-		auto const exit_code = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stdout_);
-		if (exit_code != 0)
+		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
+		if (result.exit_code != 0)
 		{
-			return exit_code;
+			return result.exit_code;
 		}
 	}
 
@@ -524,7 +567,7 @@ static int run_project(project_config const &project_config)
 
 	auto const executable_file = bin_directory / executable_file_name;
 
-	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_);
+	return run_command(executable_file.string(), build_config.run_args, output_kind::stderr_).exit_code;
 }
 
 static int create_new_project(void)
