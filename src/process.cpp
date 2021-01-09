@@ -116,7 +116,7 @@ static process_result run_process_without_capture(std::string command, output_ki
 	}
 
 	auto const exit_code = std::system(command.c_str());
-	return WEXITSTATUS(exit_code);
+	return { 0, 0, WEXITSTATUS(exit_code) };
 }
 
 #endif // windows
