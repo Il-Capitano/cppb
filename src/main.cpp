@@ -287,6 +287,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 			)
 			{
 				auto const source_file_name = source_file.generic_string();
+				auto const relative_source_file_name = fs::relative(source_file).generic_string();
 				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
 
 				if (emit_compile_commands)
@@ -306,7 +307,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 					compilation_results[finished->first] = finished->second.get();
 					compilation_futures.erase(finished);
 				}
-				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), source_file_name);
+				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
 				if (ctcli::option_value<ctcli::option("build --verbose")>)
 				{
 					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
@@ -331,7 +332,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 		for (std::size_t i = 0; i < compilation_results.size(); ++i)
 		{
 			auto const result = compilation_results[i];
-			auto const source_file_name = compilation_units[i].file_path.generic_string();
+			auto const relative_source_file_name = fs::relative(compilation_units[i].file_path).generic_string();
 			if (result.exit_code != 0 || result.error_count != 0 || result.warning_count != 0)
 			{
 				is_good = is_good && result.exit_code == 0 && result.error_count == 0;
@@ -366,11 +367,11 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 				}();
 				if (result.exit_code != 0 || result.error_count != 0)
 				{
-					report_error(source_file_name, message);
+					report_error(relative_source_file_name, message);
 				}
 				else
 				{
-					report_warning(source_file_name, message);
+					report_warning(relative_source_file_name, message);
 				}
 			}
 		}
@@ -404,6 +405,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 			)
 			{
 				auto const source_file_name = source_file.generic_string();
+				auto const relative_source_file_name = fs::relative(source_file).generic_string();
 				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
 
 				if (emit_compile_commands)
@@ -411,7 +413,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 					compile_commands.push_back({ source_file_name, args });
 				}
 
-				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), source_file_name);
+				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
 				if (ctcli::option_value<ctcli::option("build --verbose")>)
 				{
 					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
@@ -460,7 +462,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 #endif // windows
 	}();
 
-	auto const executable_file = bin_directory / executable_file_name;
+	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 	auto const last_object_write_time = object_files
 		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
 		.max(fs::file_time_type::min());
@@ -470,7 +472,8 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 		|| fs::last_write_time(executable_file) < last_object_write_time
 	)
 	{
-		fmt::print("linking {}\n", executable_file.generic_string());
+		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
+		fmt::print("linking {}\n", relative_executable_file_name);
 		cppb::vector<std::string> link_args;
 		link_args.emplace_back("-o");
 		link_args.emplace_back(executable_file.generic_string());
@@ -565,9 +568,9 @@ static int run_project(project_config const &project_config)
 #endif // windows
 	}();
 
-	auto const executable_file = bin_directory / executable_file_name;
+	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 
-	return run_command(executable_file.string(), build_config.run_args, output_kind::stderr_).exit_code;
+	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_).exit_code;
 }
 
 static int create_new_project(void)
