@@ -34,7 +34,10 @@
 		"configs": {
 			"windows-debug": {},
 			"windows-release": {},
-			"linux-debug": {},
+			"linux-debug": {
+				"cpp_compiler_flags": [ "-fsanitize=address" ],
+				"link_flags": [ "-fsanitize=address" ]
+			},
 			"linux-release": {},
 			"windows": {},
 			"linux": {
