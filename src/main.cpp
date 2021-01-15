@@ -570,6 +570,13 @@ static int run_project(project_config const &project_config)
 
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 
+	std::string run_info = fmt::format("running {}", fs::relative(executable_file).generic_string());
+	for (auto const &arg : build_config.run_args)
+	{
+		run_info += ' ';
+		run_info += arg;
+	}
+	fmt::print("{}\n", run_info);
 	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_).exit_code;
 }
 
