@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif // windows
 
@@ -27,7 +28,7 @@ static process_result run_process_with_capture(std::string command, output_kind 
 	auto const process = popen(command.c_str(), "r");
 	if (process == nullptr)
 	{
-		fmt::print("popen failed!\n");
+		fmt::print(stderr, "popen failed!\n");
 		result.exit_code = -1;
 		return result;
 	}
@@ -121,7 +122,7 @@ static process_result run_process_without_capture(std::string command, output_ki
 
 #endif // windows
 
-process_result run_command(std::string_view executable, cppb::vector<std::string> arguments, output_kind output)
+process_result run_command(std::string_view executable, cppb::vector<std::string> const &arguments, output_kind output)
 {
 	std::string command{ executable };
 	for (auto const &arg : arguments)
@@ -138,4 +139,47 @@ process_result run_command(std::string_view executable, cppb::vector<std::string
 	{
 		return run_process_without_capture(std::move(command), output);
 	}
+}
+
+std::string capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments)
+{
+	std::string command{ executable };
+	for (auto const &arg : arguments)
+	{
+		command += ' ';
+		command += arg;
+	}
+
+	// redirect stderr to stdout for popen to capture it
+#ifdef _WIN32
+	command += " 2>&1";
+#else
+	command += " 2>&1";
+#endif // windows
+
+#ifdef _WIN32
+#define popen _popen
+#define pclose _pclose
+#endif
+
+	auto const process = popen(command.c_str(), "r");
+	if (process == nullptr)
+	{
+		fmt::print(stderr, "popen failed!\n");
+		exit(1);
+	}
+
+	std::string result;
+	char buffer[1024];
+	while (std::fgets(buffer, sizeof buffer, process) != nullptr)
+	{
+		result += buffer;
+	}
+
+	auto const exit_code = pclose(process);
+	if (exit_code != 0)
+	{
+		result.clear();
+	}
+	return result;
 }

@@ -20,7 +20,7 @@ struct vector : std::vector<T>, ranges::collection_base<vector<T>>
 	template<typename Range>
 	void append(Range &&range)
 	{
-		for (auto &&val : range)
+		for (auto &&val : std::forward<Range>(range))
 		{
 			this->emplace_back(std::forward<decltype(val)>(val));
 		}

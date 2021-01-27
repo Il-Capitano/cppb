@@ -8,14 +8,13 @@
 		"c_compiler_flags": [],
 		"cpp_compiler_flags": [],
 		"link_flags": [],
+		"libraries": [ "fmt" ],
 
 		"run_args": [],
 
 		"source_directory": "src",
 
 		"include_paths": [],
-		"library_paths": [],
-		"libraries": [ "fmt" ],
 
 		"defines": [],
 		"warnings": [
@@ -42,7 +41,7 @@
 			"windows": {},
 			"linux": {
 				"cpp_standard": "c++17",
-				"libraries": [ "pthread" ]
+				"link_flags": [ "-lpthread" ]
 			},
 			"debug": {
 				"optimization": "0"

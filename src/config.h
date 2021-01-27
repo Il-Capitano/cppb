@@ -19,14 +19,13 @@ struct config
 	cppb::vector<std::string> c_compiler_flags;
 	cppb::vector<std::string> cpp_compiler_flags;
 	cppb::vector<std::string> link_flags;
+	cppb::vector<std::string> libraries;
 
 	cppb::vector<std::string> run_args;
 
 	fs::path source_directory;
 
 	cppb::vector<fs::path> include_paths;
-	cppb::vector<fs::path> library_paths;
-	cppb::vector<std::string> libraries;
 
 	cppb::vector<std::string> defines;
 	cppb::vector<std::string> warnings;
@@ -72,9 +71,9 @@ struct project_config_is_set
 };
 
 cppb::vector<project_config> read_config_json(fs::path const &config_file_path, std::string &error);
-void add_c_compiler_flags(std::vector<std::string> &args, config const &config);
-void add_cpp_compiler_flags(std::vector<std::string> &args, config const &config);
-void add_link_flags(std::vector<std::string> &args, config const &config);
+void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config);
+void add_cpp_compiler_flags(cppb::vector<std::string> &args, config const &config);
+void add_link_flags(cppb::vector<std::string> &args, config const &config);
 
 void output_default_config_json(fs::path const &config_path, std::string_view source_directory);
 
