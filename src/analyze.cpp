@@ -1,6 +1,4 @@
 #include "analyze.h"
-#include <bits/fs_path.h>
-#include <compare>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
