@@ -10,6 +10,68 @@
 #include "process.h"
 #include "cl_options.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#endif // windows
+
+#ifdef _WIN32
+
+static void report_error(std::string_view site, std::string_view message)
+{
+	auto const h = GetStdHandle(STD_ERROR_HANDLE);
+	auto const original_attributes = [h]() {
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		GetConsoleScreenBufferInfo(h, &info);
+		return info.wAttributes;
+	}();
+
+	constexpr WORD foreground_bits = FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	constexpr WORD background_bits = BACKGROUND_INTENSITY | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE;
+	constexpr WORD other_bits = static_cast<WORD>(~(foreground_bits | background_bits));
+
+	WORD const original_background = original_attributes & background_bits;
+	WORD const original_other      = original_attributes & other_bits;
+
+	constexpr WORD bright_white = FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	constexpr WORD bright_red = FOREGROUND_INTENSITY | FOREGROUND_RED;
+
+	SetConsoleTextAttribute(h, bright_white | original_background | original_other);
+	fmt::print(stderr, "{}: ", site);
+	SetConsoleTextAttribute(h, bright_red | original_background | original_other);
+	fmt::print(stderr, "error: ");
+	SetConsoleTextAttribute(h, original_attributes);
+	fmt::print(stderr, "{}\n", message);
+}
+
+static void report_warning(std::string_view site, std::string_view message)
+{
+	auto const h = GetStdHandle(STD_ERROR_HANDLE);
+	auto const original_attributes = [h]() {
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		GetConsoleScreenBufferInfo(h, &info);
+		return info.wAttributes;
+	}();
+
+	constexpr WORD foreground_bits = FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	constexpr WORD background_bits = BACKGROUND_INTENSITY | BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE;
+	constexpr WORD other_bits = static_cast<WORD>(~(foreground_bits | background_bits));
+
+	WORD const original_background = original_attributes & background_bits;
+	WORD const original_other      = original_attributes & other_bits;
+
+	constexpr WORD bright_white = FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
+	constexpr WORD bright_magenta = FOREGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_BLUE;
+
+	SetConsoleTextAttribute(h, bright_white | original_background | original_other);
+	fmt::print(stderr, "{}: ", site);
+	SetConsoleTextAttribute(h, bright_magenta | original_background | original_other);
+	fmt::print(stderr, "warning: ");
+	SetConsoleTextAttribute(h, original_attributes);
+	fmt::print(stderr, "{}\n", message);
+}
+
+#else
+
 static void report_error(std::string_view site, std::string_view message)
 {
 	fmt::print(stderr, fg(fmt::terminal_color::bright_white), "{}: ", site);
@@ -23,6 +85,8 @@ static void report_warning(std::string_view site, std::string_view message)
 	fmt::print(stderr, fg(fmt::terminal_color::bright_magenta), "warning: ");
 	fmt::print(stderr, "{}\n", message);
 }
+
+#endif // windows
 
 static bool ends_with(std::string_view str, std::string_view pattern)
 {
