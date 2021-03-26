@@ -7,7 +7,7 @@
 
 		"c_compiler_flags": [],
 		"cpp_compiler_flags": [],
-		"link_flags": [],
+		"link_flags": [ "-fuse-ld=lld" ],
 		"libraries": [ "fmt" ],
 
 		"run_args": [],
@@ -40,7 +40,6 @@
 			"linux-release": {},
 			"windows": {},
 			"linux": {
-				"cpp_standard": "c++17",
 				"link_flags": [ "-lpthread" ]
 			},
 			"debug": {
