@@ -2,6 +2,7 @@
 #include "process.h"
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <rapidjson/document.h>
 #include <rapidjson/error/error.h>
 #include <rapidjson/writer.h>
@@ -167,28 +168,31 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 
 static void fill_config(rapidjson::Value::ConstObject object, config &config, config_is_set &config_is_set, std::string &error)
 {
-	if (auto const compiler_it = object.FindMember("compiler"); compiler_it != object.MemberEnd())
+	if (!config_is_set.compiler)
 	{
-		if (!compiler_it->value.IsString())
+		if (auto const compiler_it = object.FindMember("compiler"); compiler_it != object.MemberEnd())
 		{
-			error = "value of member 'compiler' in configuration file must be a 'String'";
-			return;
-		}
-		std::string_view const compiler = compiler_it->value.GetString();
-		if (compiler == "gcc" || compiler == "g++" || compiler == "GCC")
-		{
-			config.compiler = compiler_kind::gcc;
-			config_is_set.compiler = true;
-		}
-		else if (compiler == "clang" || compiler == "clang++" || compiler == "Clang")
-		{
-			config.compiler = compiler_kind::clang;
-			config_is_set.compiler = true;
-		}
-		else
-		{
-			error = fmt::format("invalid value '{}' for member 'compiler' in configuration file", compiler);
-			return;
+			if (!compiler_it->value.IsString())
+			{
+				error = "value of member 'compiler' in configuration file must be a 'String'";
+				return;
+			}
+			std::string_view const compiler = compiler_it->value.GetString();
+			if (compiler == "gcc" || compiler == "g++" || compiler == "GCC")
+			{
+				config.compiler = compiler_kind::gcc;
+				config_is_set.compiler = true;
+			}
+			else if (compiler == "clang" || compiler == "clang++" || compiler == "Clang")
+			{
+				config.compiler = compiler_kind::clang;
+				config_is_set.compiler = true;
+			}
+			else
+			{
+				error = fmt::format("invalid value '{}' for member 'compiler' in configuration file", compiler);
+				return;
+			}
 		}
 	}
 
@@ -250,191 +254,294 @@ do { if (!config_is_set.member) { config.member = default_value; } } while (fals
 #undef fill_default_value
 }
 
-static project_config make_project_config(std::string_view name, rapidjson::Value::ConstObject object, std::string &error)
+enum class resolve_state
 {
-	project_config        result{};
-	project_config_is_set result_is_set{};
-	result.project_name = name;
+	none, resolving, all,
+	circular_error, error,
+};
+
+struct config_object_pair
+{
+	std::string_view name;
+	rapidjson::Value::ConstObject json_object;
+	project_config *config;
+	resolve_state state;
+};
+
+static void resolve_project_config(
+	config_object_pair &config_object,
+	std::span<config_object_pair> configs,
+	std::string &error
+)
+{
+	auto &config = *config_object.config;
+	project_config_is_set is_set{};
+	auto const &object = config_object.json_object;
+	if (config_object.state == resolve_state::all)
+	{
+		return;
+	}
+	else if (config_object.state == resolve_state::resolving)
+	{
+		error = fmt::format("circular dependency encountered in config file; '{}'", config_object.name);
+		config_object.state = resolve_state::circular_error;
+		return;
+	}
+	config_object.state = resolve_state::resolving;
+	config.project_name = config_object.name;
+
+	bool needs_default_values = true;
+	if (
+		auto const depends_on_it = config_object.json_object.FindMember("depends_on");
+		depends_on_it != config_object.json_object.MemberEnd()
+	)
+	{
+		needs_default_values = false;
+
+		if (!depends_on_it->value.IsString())
+		{
+			error = "value of member 'depends_on' in configuration file must be a 'String'";
+			config_object.state = resolve_state::error;
+			return;
+		}
+		auto const it = std::find_if(
+			configs.begin(), configs.end(),
+			[depends_on_name = depends_on_it->value.GetString()](auto const &config_) {
+				return config_.name == depends_on_name;
+			}
+		);
+		if (it == configs.end())
+		{
+			error = fmt::format(
+				"invalid value '{}' for member 'depends_on', there's no such configuration",
+				depends_on_it->value.GetString()
+			);
+			config_object.state = resolve_state::error;
+			return;
+		}
+
+		resolve_project_config(*it, configs, error);
+		if (it->state == resolve_state::circular_error)
+		{
+			error += fmt::format(" required by '{}'", config_object.name);
+			config_object.state = resolve_state::circular_error;
+			return;
+		}
+
+		config.windows_debug   = it->config->windows_debug;
+		config.windows_release = it->config->windows_release;
+		config.linux_debug   = it->config->linux_debug;
+		config.linux_release = it->config->linux_release;
+	}
 
 	if (auto const configs_it = object.FindMember("configs"); configs_it != object.MemberEnd())
 	{
 		if (!configs_it->value.IsObject())
 		{
 			error = "value of member 'configs' in configuration file must be an 'Object'";
-			return {};
+			config_object.state = resolve_state::error;
+			return;
 		}
-		auto const configs = configs_it->value.GetObject();
+		auto const configs_object = configs_it->value.GetObject();
 
-		if (auto const windows_it = configs.FindMember("windows-debug"); windows_it != configs.MemberEnd())
+		if (auto const windows_it = configs_object.FindMember("windows-debug"); windows_it != configs_object.MemberEnd())
 		{
 			if (!windows_it->value.IsObject())
 			{
 				error = "value of member 'windows-debug' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.windows_debug, result_is_set.windows_debug, error);
+			fill_config(windows_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
-		if (auto const windows_it = configs.FindMember("windows-release"); windows_it != configs.MemberEnd())
+		if (auto const windows_it = configs_object.FindMember("windows-release"); windows_it != configs_object.MemberEnd())
 		{
 			if (!windows_it->value.IsObject())
 			{
 				error = "value of member 'windows-release' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.windows_release, result_is_set.windows_release, error);
+			fill_config(windows_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
-		if (auto const windows_it = configs.FindMember("linux-debug"); windows_it != configs.MemberEnd())
+		if (auto const windows_it = configs_object.FindMember("linux-debug"); windows_it != configs_object.MemberEnd())
 		{
 			if (!windows_it->value.IsObject())
 			{
 				error = "value of member 'linux-debug' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.linux_debug, result_is_set.linux_debug, error);
+			fill_config(windows_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
-		if (auto const windows_it = configs.FindMember("linux-release"); windows_it != configs.MemberEnd())
+		if (auto const windows_it = configs_object.FindMember("linux-release"); windows_it != configs_object.MemberEnd())
 		{
 			if (!windows_it->value.IsObject())
 			{
 				error = "value of member 'linux-release' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.linux_release, result_is_set.linux_release, error);
+			fill_config(windows_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
 
-		if (auto const debug_it = configs.FindMember("debug"); debug_it != configs.MemberEnd())
+		if (auto const debug_it = configs_object.FindMember("debug"); debug_it != configs_object.MemberEnd())
 		{
 			if (!debug_it->value.IsObject())
 			{
 				error = "value of member 'debug' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(debug_it->value.GetObject(), result.windows_debug, result_is_set.windows_debug, error);
+			fill_config(debug_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(debug_it->value.GetObject(), result.linux_debug, result_is_set.linux_debug, error);
+			fill_config(debug_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
-		if (auto const release_it = configs.FindMember("release"); release_it != configs.MemberEnd())
+		if (auto const release_it = configs_object.FindMember("release"); release_it != configs_object.MemberEnd())
 		{
 			if (!release_it->value.IsObject())
 			{
 				error = "value of member 'release' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(release_it->value.GetObject(), result.windows_release, result_is_set.windows_release, error);
+			fill_config(release_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(release_it->value.GetObject(), result.linux_release, result_is_set.linux_release, error);
+			fill_config(release_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
 
-		if (auto const windows_it = configs.FindMember("windows"); windows_it != configs.MemberEnd())
+		if (auto const windows_it = configs_object.FindMember("windows"); windows_it != configs_object.MemberEnd())
 		{
 			if (!windows_it->value.IsObject())
 			{
 				error = "value of member 'windows' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.windows_debug, result_is_set.windows_debug, error);
+			fill_config(windows_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(windows_it->value.GetObject(), result.windows_release, result_is_set.windows_release, error);
+			fill_config(windows_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
-		if (auto const linux_it = configs.FindMember("linux"); linux_it != configs.MemberEnd())
+		if (auto const linux_it = configs_object.FindMember("linux"); linux_it != configs_object.MemberEnd())
 		{
 			if (!linux_it->value.IsObject())
 			{
 				error = "value of member 'linux' in configuration file must be an 'Object'";
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(linux_it->value.GetObject(), result.linux_debug, result_is_set.linux_debug, error);
+			fill_config(linux_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
-			fill_config(linux_it->value.GetObject(), result.linux_release, result_is_set.linux_release, error);
+			fill_config(linux_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
-				return {};
+				config_object.state = resolve_state::error;
+				return;
 			}
 		}
 	}
 
-	fill_config(object, result.windows_debug, result_is_set.windows_debug, error);
+	fill_config(object, config.windows_debug, is_set.windows_debug, error);
 	if (!error.empty())
 	{
-		return {};
+		config_object.state = resolve_state::error;
+		return;
 	}
-	fill_config(object, result.windows_release, result_is_set.windows_release, error);
+	fill_config(object, config.windows_release, is_set.windows_release, error);
 	if (!error.empty())
 	{
-		return {};
+		config_object.state = resolve_state::error;
+		return;
 	}
-	fill_config(object, result.linux_debug, result_is_set.linux_debug, error);
+	fill_config(object, config.linux_debug, is_set.linux_debug, error);
 	if (!error.empty())
 	{
-		return {};
+		config_object.state = resolve_state::error;
+		return;
 	}
-	fill_config(object, result.linux_release, result_is_set.linux_release, error);
+	fill_config(object, config.linux_release, is_set.linux_release, error);
 	if (!error.empty())
 	{
-		return {};
+		config_object.state = resolve_state::error;
+		return;
 	}
 
-	fill_default_config_values(result.windows_debug,   result_is_set.windows_debug);
-	fill_default_config_values(result.windows_release, result_is_set.windows_release);
-	fill_default_config_values(result.linux_debug,   result_is_set.linux_debug);
-	fill_default_config_values(result.linux_release, result_is_set.linux_release);
-	if (!result_is_set.windows_debug.optimization)
+	config_object.state = resolve_state::all;
+
+	if (needs_default_values)
 	{
-		result.windows_debug.optimization = "0";
+		fill_default_config_values(config.windows_debug,   is_set.windows_debug);
+		fill_default_config_values(config.windows_release, is_set.windows_release);
+		fill_default_config_values(config.linux_debug,   is_set.linux_debug);
+		fill_default_config_values(config.linux_release, is_set.linux_release);
+		if (!is_set.windows_debug.optimization)
+		{
+			config.windows_debug.optimization = "0";
+		}
+		if (!is_set.windows_release.optimization)
+		{
+			config.windows_release.optimization = "3";
+		}
+		if (!is_set.linux_debug.optimization)
+		{
+			config.linux_debug.optimization = "0";
+		}
+		if (!is_set.linux_release.optimization)
+		{
+			config.linux_release.optimization = "3";
+		}
 	}
-	if (!result_is_set.windows_release.optimization)
-	{
-		result.windows_release.optimization = "3";
-	}
-	if (!result_is_set.linux_debug.optimization)
-	{
-		result.linux_debug.optimization = "0";
-	}
-	if (!result_is_set.linux_release.optimization)
-	{
-		result.linux_release.optimization = "3";
-	}
-	return result;
 }
 
 cppb::vector<project_config> read_config_json(fs::path const &dep_file_path, std::string &error)
@@ -462,22 +569,40 @@ cppb::vector<project_config> read_config_json(fs::path const &dep_file_path, std
 		return {};
 	}
 
-	cppb::vector<project_config> result{};
-
-	auto const object = d.GetObject();
-	auto const begin = object.begin();
-	auto const end   = object.end();
-	for (auto it = begin; it.operator->() != end.operator->(); ++it)
-	{
-		auto const &member = *it;
-		assert(member.name.IsString());
-		std::string_view const name = member.name.GetString();
-		if (!member.value.IsObject())
+	cppb::vector<config_object_pair> config_objects = [&]() {
+		cppb::vector<config_object_pair> result;
+		auto const object = d.GetObject();
+		auto const begin = object.begin();
+		auto const end   = object.end();
+		for (auto it = begin; it.operator->() != end.operator->(); ++it)
 		{
-			error = fmt::format("configuration value for member '{}' must be an 'Object'", name);
-			return {};
+			auto const &member = *it;
+			assert(member.name.IsString());
+			std::string_view const name = member.name.GetString();
+			if (!member.value.IsObject())
+			{
+				error = fmt::format("configuration value for member '{}' must be an 'Object'", name);
+				return result;
+			}
+			result.push_back({ name, member.value.GetObject(), nullptr, resolve_state::none });
 		}
-		result.emplace_back(make_project_config(name, member.value.GetObject(), error));
+		return result;
+	}();
+	if (!error.empty())
+	{
+		return {};
+	}
+	cppb::vector<project_config> result{};
+	result.resize(config_objects.size());
+
+	for (std::size_t i = 0; i < config_objects.size(); ++i)
+	{
+		config_objects[i].config = &result[i];
+	}
+
+	for (auto &config_object : config_objects)
+	{
+		resolve_project_config(config_object, config_objects, error);
 		if (!error.empty())
 		{
 			return {};

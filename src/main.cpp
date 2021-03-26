@@ -179,7 +179,7 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 		}
 #endif // windows
 	}();
-	auto const intermediate_bin_directory = bin_directory / "int";
+	auto const intermediate_bin_directory = bin_directory / fmt::format("int-{}", project_config.project_name);
 	fs::create_directories(intermediate_bin_directory);
 
 	auto const cppb_dir = fs::path(ctcli::option_value<ctcli::option("build --cppb-dir")>);
