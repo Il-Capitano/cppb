@@ -230,8 +230,12 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 
 	cppb::vector<fs::path> object_files;
 	auto const compilation_units = source_files.filter(
-		[](auto const &source) {
-			return source_extensions.is_any([&source](auto const extension) {
+		[source_directory = fs::absolute(build_config.source_directory).lexically_normal()](auto const &source) {
+			auto const source_size     = std::distance(source.file_path.begin(), source.file_path.end());
+			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
+			auto const is_in_source_directory = source_size > source_dir_size
+				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
+			return is_in_source_directory && source_extensions.is_any([&source](auto const extension) {
 				return source.file_path.extension().generic_string() == extension;
 			});
 		}
