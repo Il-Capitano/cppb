@@ -88,11 +88,6 @@ static void report_warning(std::string_view site, std::string_view message)
 
 #endif // windows
 
-static bool ends_with(std::string_view str, std::string_view pattern)
-{
-	return ctcli::string_view(str).ends_with(pattern);
-}
-
 static void print_command(std::string_view executable, cppb::vector<std::string> const &arguments)
 {
 	std::string command{ executable };
@@ -104,32 +99,896 @@ static void print_command(std::string_view executable, cppb::vector<std::string>
 	fmt::print("{}\n", command);
 }
 
-static cppb::vector<std::string> get_compiler_args(config const &build_config, std::string source_file_name, std::string object_file_name)
+static cppb::vector<std::string> get_common_c_compiler_flags(config const &build_config)
 {
-	cppb::vector<std::string> args;
+	cppb::vector<std::string> result;
 
-	args.emplace_back("-c");
+	result.emplace_back("-c");
 	if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
 	{
-		args.emplace_back("-g");
+		result.emplace_back("-g");
 	}
-	if (ends_with(source_file_name, ".c"))
+	add_c_compiler_flags(result, build_config);
+	for (auto const positional_arg : ctcli::positional_arguments<ctcli::command("build")>)
 	{
-		add_c_compiler_flags(args, build_config);
+		result.emplace_back(positional_arg);
+	}
+
+	return result;
+}
+
+static cppb::vector<std::string> get_common_cpp_compiler_flags(config const &build_config)
+{
+	cppb::vector<std::string> result;
+
+	result.emplace_back("-c");
+	if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+	{
+		result.emplace_back("-g");
+	}
+	add_cpp_compiler_flags(result, build_config);
+	for (auto const positional_arg : ctcli::positional_arguments<ctcli::command("build")>)
+	{
+		result.emplace_back(positional_arg);
+	}
+
+	return result;
+}
+
+static std::string get_c_compiler(config const &build_config)
+{
+	if (!build_config.c_compiler_path.empty())
+	{
+		return build_config.c_compiler_path.string();
 	}
 	else
 	{
-		add_cpp_compiler_flags(args, build_config);
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			if (build_config.compiler_version == -1)
+			{
+				return "gcc";
+			}
+			else
+			{
+				return fmt::format("gcc-{}", build_config.compiler_version);
+			}
+		case compiler_kind::clang:
+			if (build_config.compiler_version == -1)
+			{
+				return "clang";
+			}
+			else
+			{
+				return fmt::format("clang-{}", build_config.compiler_version);
+			}
+		}
 	}
-	for (auto const positional_arg : ctcli::positional_arguments<ctcli::command("build")>)
-	{
-		args.emplace_back(positional_arg);
-	}
-	args.emplace_back("-o");
-	args.emplace_back(std::move(object_file_name));
-	args.emplace_back(std::move(source_file_name));
+}
 
-	return args;
+static std::string get_cpp_compiler(config const &build_config)
+{
+	if (!build_config.cpp_compiler_path.empty())
+	{
+		return build_config.cpp_compiler_path.string();
+	}
+	else
+	{
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			if (build_config.compiler_version == -1)
+			{
+				return "g++";
+			}
+			else
+			{
+				return fmt::format("g++-{}", build_config.compiler_version);
+			}
+		case compiler_kind::clang:
+			if (build_config.compiler_version == -1)
+			{
+				return "clang++";
+			}
+			else
+			{
+				return fmt::format("clang++-{}", build_config.compiler_version);
+			}
+		}
+	}
+}
+
+static int build_project_async(
+	std::string_view project_name,
+	config const &build_config,
+	cppb::vector<source_file> const &source_files,
+	fs::path const &bin_directory,
+	fs::path const &intermediate_bin_directory,
+	fs::file_time_type config_last_update
+)
+{
+	auto const emit_compile_commands = (
+			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
+			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
+		) && [&]() {
+			fs::path const compile_commands_json = "./compile_commands.json";
+			return !fs::exists(compile_commands_json)
+				|| fs::last_write_time(compile_commands_json) < source_files
+					.transform([](auto const &source) { return source.last_modified_time; })
+					.max(fs::file_time_type::min());
+		}();
+	cppb::vector<compile_command> compile_commands;
+
+	cppb::vector<fs::path> object_files;
+	auto const compilation_units = source_files.filter(
+		[source_directory = fs::absolute(build_config.source_directory).lexically_normal()](auto const &source) {
+			auto const source_size     = std::distance(source.file_path.begin(), source.file_path.end());
+			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
+			auto const is_in_source_directory = source_size > source_dir_size
+				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
+			return is_in_source_directory && source_extensions.is_any([&source](auto const extension) {
+				return source.file_path.extension().generic_string() == extension;
+			});
+		}
+	).collect<cppb::vector>();
+
+	int const compilation_units_count_width = [&]() {
+		auto i = compilation_units.size();
+		int result = 0;
+		do
+		{
+			++result;
+			i /= 10;
+		} while (i != 0);
+		return result;
+	}();
+
+	if (emit_compile_commands)
+	{
+		compile_commands.reserve(compilation_units.size());
+	}
+	cppb::vector<process_result> compilation_results;
+	cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
+	auto const is_any_future_finished = [&compilation_futures]() {
+		for (auto const &[index, future] : compilation_futures)
+		{
+			using namespace std::chrono_literals;
+			if (future.wait_for(0ms) == std::future_status::ready)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	auto const get_finished_future = [&compilation_futures]() {
+		using namespace std::chrono_literals;
+		return std::find_if(
+			compilation_futures.begin(), compilation_futures.end(),
+			[](auto const &index_future) {
+				return index_future.second.wait_for(0ms) == std::future_status::ready;
+			}
+		);
+	};
+
+	compilation_results.resize(compilation_units.size());
+
+	auto const c_compiler   = get_c_compiler(build_config);
+	auto const cpp_compiler = get_cpp_compiler(build_config);
+
+	auto common_c_flags   = get_common_c_compiler_flags(build_config);
+	auto common_cpp_flags = get_common_cpp_compiler_flags(build_config);
+
+	cppb::vector<std::string> c_compiler_args   = common_c_flags;
+	cppb::vector<std::string> cpp_compiler_args = common_cpp_flags;
+
+	auto c_pch_last_update   = fs::file_time_type::min();
+	auto cpp_pch_last_update = fs::file_time_type::min();
+
+	if (!build_config.c_precompiled_header.empty())
+	{
+		auto const &header_file = build_config.c_precompiled_header;
+		auto const header_it = std::find_if(
+			source_files.begin(), source_files.end(),
+			[&](auto const &source) {
+				return fs::equivalent(source.file_path, header_file);
+			}
+		);
+		if (header_it == source_files.end())
+		{
+			report_error(
+				header_file.generic_string(),
+				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
+			);
+			return 1;
+		}
+		auto const pch_file = [&]() {
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+			{
+				auto result = header_file;
+				result += ".gch";
+				return result;
+			}
+			case compiler_kind::clang:
+			{
+				auto result = intermediate_bin_directory / header_file.filename();
+				result += ".pch";
+				return result;
+			}
+			}
+		}();
+
+		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
+		c_pch_last_update = pch_last_write_time;
+		if (
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| pch_last_write_time < header_it->last_modified_time
+			|| pch_last_write_time < config_last_update
+		)
+		{
+			auto const header_file_name = header_file.generic_string();
+			auto const pch_file_name = pch_file.generic_string();
+
+			c_compiler_args.emplace_back("-o");
+			c_compiler_args.emplace_back(pch_file_name);
+			c_compiler_args.emplace_back("-x");
+			c_compiler_args.emplace_back("c-header");
+			c_compiler_args.emplace_back(header_file_name);
+
+			auto const relative_header_file_name = fs::relative(header_file).generic_string();
+
+			fmt::print("pre-compiling {}\n", relative_header_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(c_compiler, c_compiler_args);
+			}
+			auto const result = run_command(c_compiler, c_compiler_args, output_kind::stderr_);
+			if (result.exit_code != 0)
+			{
+				return 1;
+			}
+
+			c_compiler_args.resize(common_c_flags.size());
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+				break;
+			case compiler_kind::clang:
+				common_c_flags.emplace_back("-include-pch");
+				common_c_flags.emplace_back(pch_file_name);
+				c_compiler_args.emplace_back("-include-pch");
+				c_compiler_args.emplace_back(pch_file_name);
+				break;
+			}
+		}
+	}
+	if (!build_config.cpp_precompiled_header.empty())
+	{
+		auto const &header_file = build_config.cpp_precompiled_header;
+		auto const header_it = std::find_if(
+			source_files.begin(), source_files.end(),
+			[&](auto const &source) {
+				return fs::equivalent(source.file_path, header_file);
+			}
+		);
+		if (header_it == source_files.end())
+		{
+			report_error(
+				header_file.generic_string(),
+				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
+			);
+			return 1;
+		}
+		auto const pch_file = [&]() {
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+			{
+				auto result = header_file;
+				result += ".gch";
+				return result;
+			}
+			case compiler_kind::clang:
+			{
+				auto result = intermediate_bin_directory / header_file.filename();
+				result += ".pch";
+				return result;
+			}
+			}
+		}();
+
+		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
+		cpp_pch_last_update = pch_last_write_time;
+		if (
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| pch_last_write_time < header_it->last_modified_time
+			|| pch_last_write_time < config_last_update
+		)
+		{
+			auto const header_file_name = header_file.generic_string();
+			auto const pch_file_name = pch_file.generic_string();
+
+			cpp_compiler_args.emplace_back("-o");
+			cpp_compiler_args.emplace_back(pch_file_name);
+			cpp_compiler_args.emplace_back("-x");
+			cpp_compiler_args.emplace_back("c++-header");
+			cpp_compiler_args.emplace_back(header_file_name);
+
+			auto const relative_header_file_name = fs::relative(header_file).generic_string();
+
+			fmt::print("pre-compiling {}\n", relative_header_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(cpp_compiler, cpp_compiler_args);
+			}
+			auto const result = run_command(cpp_compiler, cpp_compiler_args, output_kind::stderr_);
+			if (result.exit_code != 0)
+			{
+				return 1;
+			}
+
+			cpp_compiler_args.resize(common_cpp_flags.size());
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+				break;
+			case compiler_kind::clang:
+				common_cpp_flags.emplace_back("-include-pch");
+				common_cpp_flags.emplace_back(pch_file_name);
+				cpp_compiler_args.emplace_back("-include-pch");
+				cpp_compiler_args.emplace_back(pch_file_name);
+				break;
+			}
+		}
+	}
+
+	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
+	bool is_any_cpp = false;
+	// source file compilation
+	for (std::size_t i = 0; i < compilation_units.size(); ++i)
+	{
+		auto const &source = compilation_units[i];
+		auto const &source_file = source.file_path;
+		auto const is_c_source = source_file.extension() == ".c";
+		if (!is_c_source)
+		{
+			is_any_cpp = true;
+		}
+		object_files.emplace_back(intermediate_bin_directory / source_file.filename());
+		object_files.back() += ".o";
+		auto const &object_file = object_files.back();
+		auto const source_file_name = source_file.generic_string();
+
+		auto &args = is_c_source ? c_compiler_args : cpp_compiler_args;
+		args.emplace_back("-o");
+		args.emplace_back(object_file.generic_string());
+		args.emplace_back(source_file_name);
+
+		if (
+			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| object_last_write_time < source.last_modified_time
+			|| object_last_write_time < config_last_update
+			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
+		)
+		{
+			auto const relative_source_file_name = fs::relative(source_file).generic_string();
+
+			if (emit_compile_commands)
+			{
+				compile_commands.push_back({ source_file_name, args });
+			}
+
+			if (compilation_futures.size() == job_count)
+			{
+				while (!is_any_future_finished())
+				{
+					using namespace std::chrono_literals;
+					compilation_futures.front().second.wait_for(20ms);
+				}
+				auto const finished = get_finished_future();
+				assert(finished != compilation_futures.end());
+				compilation_results[finished->first] = finished->second.get();
+				compilation_futures.erase(finished);
+			}
+			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(is_c_source ? c_compiler : cpp_compiler, args);
+			}
+			compilation_futures.push_back({ i, std::async(&run_command, is_c_source ? c_compiler : cpp_compiler, args, output_kind::null_) });
+		}
+		else if (emit_compile_commands)
+		{
+			compile_commands.push_back({ std::move(source_file_name), args });
+		}
+
+		if (is_c_source)
+		{
+			args.resize(common_c_flags.size());
+		}
+		else
+		{
+			args.resize(common_cpp_flags.size());
+		}
+	}
+
+	for (auto &[index, future] : compilation_futures)
+	{
+		compilation_results[index] = future.get();
+	}
+
+	bool is_good = true;
+	assert(compilation_results.size() == compilation_units.size());
+	for (std::size_t i = 0; i < compilation_results.size(); ++i)
+	{
+		auto const result = compilation_results[i];
+		auto const relative_source_file_name = fs::relative(compilation_units[i].file_path).generic_string();
+		if (result.exit_code != 0 || result.error_count != 0 || result.warning_count != 0)
+		{
+			is_good = is_good && result.exit_code == 0 && result.error_count == 0;
+			auto const message = [&]() {
+				if (result.error_count != 0 && result.warning_count != 0)
+				{
+					return fmt::format(
+						"compilation failed with {} error{} and {} warning{}; use '-s' to see compiler output",
+						result.error_count, result.error_count == 1 ? "" : "s",
+						result.warning_count, result.warning_count == 1 ? "" : "s"
+					);
+				}
+				else if (result.error_count != 0)
+				{
+					return fmt::format(
+						"compilation failed with {} error{}; use '-s' to see compiler output",
+						result.error_count, result.error_count == 1 ? "" : "s"
+					);
+				}
+				else if (result.warning_count != 0)
+				{
+					return fmt::format(
+						"{} warning{} emitted by compiler; use '-s' to see compiler output",
+						result.warning_count, result.warning_count == 1 ? "" : "s"
+					);
+				}
+				else // if (result.error_count == 0 && result.warning_cont == 0)
+				{
+					// this shouldn't normally happen, but we handle it anyways
+					return fmt::format("compilation failed with exit code {}; use '-s' to see compiler output", result.exit_code);
+				}
+			}();
+			if (result.exit_code != 0 || result.error_count != 0)
+			{
+				report_error(relative_source_file_name, message);
+			}
+			else
+			{
+				report_warning(relative_source_file_name, message);
+			}
+		}
+	}
+
+	if (!is_good)
+	{
+		return 1;
+	}
+
+	if (compile_commands.size() != 0)
+	{
+		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
+		write_compile_commands_json(compile_commands);
+	}
+
+	auto const project_directory_name = fs::current_path().filename().generic_string();
+	auto const executable_file_name = [&]() -> std::string {
+#ifdef _WIN32
+		if (project_name == "default")
+		{
+			return fmt::format("{}.exe", project_directory_name);
+		}
+		else
+		{
+			return fmt::format("{}-{}.exe", project_name, project_directory_name);
+		}
+#else
+		if (project_name == "default")
+		{
+			return project_directory_name;
+		}
+		else
+		{
+			return fmt::format("{}-{}", project_name, project_directory_name);
+		}
+#endif // windows
+	}();
+
+	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
+	auto const last_object_write_time = object_files
+		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
+		.max(fs::file_time_type::min());
+	if (
+		ctcli::option_value<ctcli::option("build --link")>
+		|| !fs::exists(executable_file)
+		|| fs::last_write_time(executable_file) < last_object_write_time
+	)
+	{
+		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
+		fmt::print("linking {}\n", relative_executable_file_name);
+		cppb::vector<std::string> link_args;
+		link_args.emplace_back("-o");
+		link_args.emplace_back(executable_file.generic_string());
+		for (auto const &object_file : object_files)
+		{
+			link_args.emplace_back(object_file.generic_string());
+		}
+		add_link_flags(link_args, build_config);
+
+		if (ctcli::option_value<ctcli::option("build -v")>)
+		{
+			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
+		}
+		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
+		if (result.exit_code != 0)
+		{
+			return result.exit_code;
+		}
+	}
+
+	return 0;
+}
+
+static int build_project_sequential(
+	std::string_view project_name,
+	config const &build_config,
+	cppb::vector<source_file> const &source_files,
+	fs::path const &bin_directory,
+	fs::path const &intermediate_bin_directory,
+	fs::file_time_type config_last_update
+)
+{
+	auto const emit_compile_commands = (
+			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
+			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
+		) && [&]() {
+			fs::path const compile_commands_json = "./compile_commands.json";
+			return !fs::exists(compile_commands_json)
+				|| fs::last_write_time(compile_commands_json) < source_files
+					.transform([](auto const &source) { return source.last_modified_time; })
+					.max(fs::file_time_type::min());
+		}();
+	cppb::vector<compile_command> compile_commands;
+
+	auto const compilation_units = source_files.filter(
+		[source_directory = fs::absolute(build_config.source_directory).lexically_normal()](auto const &source) {
+			auto const source_size     = std::distance(source.file_path.begin(), source.file_path.end());
+			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
+			auto const is_in_source_directory = source_size > source_dir_size
+				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
+			return is_in_source_directory && source_extensions.is_any([&source](auto const extension) {
+				return source.file_path.extension().generic_string() == extension;
+			});
+		}
+	).collect<cppb::vector>();
+
+	int const compilation_units_count_width = [&]() {
+		auto i = compilation_units.size();
+		int result = 0;
+		do
+		{
+			++result;
+			i /= 10;
+		} while (i != 0);
+		return result;
+	}();
+
+	if (emit_compile_commands)
+	{
+		compile_commands.reserve(compilation_units.size());
+	}
+	cppb::vector<process_result> compilation_results;
+	cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
+
+	compilation_results.resize(compilation_units.size());
+	cppb::vector<fs::path> object_files;
+	object_files.reserve(compilation_units.size());
+
+	auto const c_compiler   = get_c_compiler(build_config);
+	auto const cpp_compiler = get_cpp_compiler(build_config);
+
+	auto common_c_flags   = get_common_c_compiler_flags(build_config);
+	auto common_cpp_flags = get_common_cpp_compiler_flags(build_config);
+
+	cppb::vector<std::string> c_compiler_args   = common_c_flags;
+	cppb::vector<std::string> cpp_compiler_args = common_cpp_flags;
+
+	auto c_pch_last_update   = fs::file_time_type::min();
+	auto cpp_pch_last_update = fs::file_time_type::min();
+
+	if (!build_config.c_precompiled_header.empty())
+	{
+		auto const &header_file = build_config.c_precompiled_header;
+		auto const header_it = std::find_if(
+			source_files.begin(), source_files.end(),
+			[&](auto const &source) {
+				return fs::equivalent(source.file_path, header_file);
+			}
+		);
+		if (header_it == source_files.end())
+		{
+			report_error(
+				header_file.generic_string(),
+				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
+			);
+			return 1;
+		}
+		auto const pch_file = [&]() {
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+			{
+				auto result = header_file;
+				result += ".gch";
+				return result;
+			}
+			case compiler_kind::clang:
+			{
+				auto result = intermediate_bin_directory / header_file.filename();
+				result += ".pch";
+				return result;
+			}
+			}
+		}();
+
+		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
+		c_pch_last_update = pch_last_write_time;
+		if (
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| pch_last_write_time < header_it->last_modified_time
+			|| pch_last_write_time < config_last_update
+		)
+		{
+			auto const header_file_name = header_file.generic_string();
+			auto const pch_file_name = pch_file.generic_string();
+
+			c_compiler_args.emplace_back("-o");
+			c_compiler_args.emplace_back(pch_file_name);
+			c_compiler_args.emplace_back("-x");
+			c_compiler_args.emplace_back("c-header");
+			c_compiler_args.emplace_back(header_file_name);
+
+			auto const relative_header_file_name = fs::relative(header_file).generic_string();
+
+			fmt::print("pre-compiling {}\n", relative_header_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(c_compiler, c_compiler_args);
+			}
+			auto const result = run_command(c_compiler, c_compiler_args, output_kind::stderr_);
+			if (result.exit_code != 0)
+			{
+				return 1;
+			}
+
+			c_compiler_args.resize(common_c_flags.size());
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+				break;
+			case compiler_kind::clang:
+				common_c_flags.emplace_back("-include-pch");
+				common_c_flags.emplace_back(pch_file_name);
+				c_compiler_args.emplace_back("-include-pch");
+				c_compiler_args.emplace_back(pch_file_name);
+				break;
+			}
+		}
+	}
+	if (!build_config.cpp_precompiled_header.empty())
+	{
+		auto const &header_file = build_config.cpp_precompiled_header;
+		auto const header_it = std::find_if(
+			source_files.begin(), source_files.end(),
+			[&](auto const &source) {
+				return fs::equivalent(source.file_path, header_file);
+			}
+		);
+		if (header_it == source_files.end())
+		{
+			report_error(
+				header_file.generic_string(),
+				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
+			);
+			return 1;
+		}
+		auto const pch_file = [&]() {
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+			{
+				auto result = header_file;
+				result += ".gch";
+				return result;
+			}
+			case compiler_kind::clang:
+			{
+				auto result = intermediate_bin_directory / header_file.filename();
+				result += ".pch";
+				return result;
+			}
+			}
+		}();
+
+		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
+		cpp_pch_last_update = pch_last_write_time;
+		if (
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| pch_last_write_time < header_it->last_modified_time
+			|| pch_last_write_time < config_last_update
+		)
+		{
+			auto const header_file_name = header_file.generic_string();
+			auto const pch_file_name = pch_file.generic_string();
+
+			cpp_compiler_args.emplace_back("-o");
+			cpp_compiler_args.emplace_back(pch_file_name);
+			c_compiler_args.emplace_back("-x");
+			c_compiler_args.emplace_back("c++-header");
+			cpp_compiler_args.emplace_back(header_file_name);
+
+			auto const relative_header_file_name = fs::relative(header_file).generic_string();
+
+			fmt::print("pre-compiling {}\n", relative_header_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(cpp_compiler, cpp_compiler_args);
+			}
+			auto const result = run_command(cpp_compiler, cpp_compiler_args, output_kind::stderr_);
+			if (result.exit_code != 0)
+			{
+				return 1;
+			}
+
+			cpp_compiler_args.resize(common_cpp_flags.size());
+			switch (build_config.compiler)
+			{
+			case compiler_kind::gcc:
+				break;
+			case compiler_kind::clang:
+				common_cpp_flags.emplace_back("-include-pch");
+				common_cpp_flags.emplace_back(pch_file_name);
+				cpp_compiler_args.emplace_back("-include-pch");
+				cpp_compiler_args.emplace_back(pch_file_name);
+				break;
+			}
+		}
+	}
+
+	bool is_any_cpp = false;
+	// source file compilation
+	for (std::size_t i = 0; i < compilation_units.size(); ++i)
+	{
+		auto const &source = compilation_units[i];
+		auto const &source_file = source.file_path;
+		auto const is_c_source = source_file.extension() == ".c";
+		if (!is_c_source)
+		{
+			is_any_cpp = true;
+		}
+		object_files.emplace_back(intermediate_bin_directory / source_file.filename());
+		object_files.back() += ".o";
+		auto const &object_file = object_files.back();
+		auto const source_file_name = source_file.generic_string();
+
+		auto &args = is_c_source ? c_compiler_args : cpp_compiler_args;
+		args.emplace_back("-o");
+		args.emplace_back(object_file.generic_string());
+		args.emplace_back(source_file_name);
+
+		if (
+			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
+			ctcli::option_value<ctcli::option("build --rebuild")>
+			|| object_last_write_time < source.last_modified_time
+			|| object_last_write_time < config_last_update
+			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
+		)
+		{
+			auto const relative_source_file_name = fs::relative(source_file).generic_string();
+
+			if (emit_compile_commands)
+			{
+				compile_commands.push_back({ source_file_name, args });
+			}
+
+			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
+			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			{
+				print_command(is_c_source ? c_compiler : cpp_compiler, args);
+			}
+			auto const result = run_command(is_c_source ? c_compiler : cpp_compiler, args, output_kind::stderr_);
+			if (result.exit_code != 0)
+			{
+				return 1;
+			}
+		}
+		else if (emit_compile_commands)
+		{
+			compile_commands.push_back({ std::move(source_file_name), args });
+		}
+
+		if (is_c_source)
+		{
+			args.resize(common_c_flags.size());
+		}
+		else
+		{
+			args.resize(common_cpp_flags.size());
+		}
+	}
+
+	if (compile_commands.size() != 0)
+	{
+		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
+		write_compile_commands_json(compile_commands);
+	}
+
+	auto const project_directory_name = fs::current_path().filename().generic_string();
+	auto const executable_file_name = [&]() -> std::string {
+#ifdef _WIN32
+		if (project_name == "default")
+		{
+			return fmt::format("{}.exe", project_directory_name);
+		}
+		else
+		{
+			return fmt::format("{}-{}.exe", project_name, project_directory_name);
+		}
+#else
+		if (project_name == "default")
+		{
+			return project_directory_name;
+		}
+		else
+		{
+			return fmt::format("{}-{}", project_name, project_directory_name);
+		}
+#endif // windows
+	}();
+
+	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
+	auto const last_object_write_time = object_files
+		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
+		.max(fs::file_time_type::min());
+	if (
+		ctcli::option_value<ctcli::option("build --link")>
+		|| !fs::exists(executable_file)
+		|| fs::last_write_time(executable_file) < last_object_write_time
+	)
+	{
+		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
+		fmt::print("linking {}\n", relative_executable_file_name);
+		cppb::vector<std::string> link_args;
+		link_args.emplace_back("-o");
+		link_args.emplace_back(executable_file.generic_string());
+		for (auto const &object_file : object_files)
+		{
+			link_args.emplace_back(object_file.generic_string());
+		}
+		add_link_flags(link_args, build_config);
+
+		if (ctcli::option_value<ctcli::option("build -v")>)
+		{
+			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
+		}
+		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
+		if (result.exit_code != 0)
+		{
+			return result.exit_code;
+		}
+	}
+
+	return 0;
 }
 
 static int build_project(project_config const &project_config, fs::file_time_type config_last_update)
@@ -228,341 +1087,29 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 	});
 	write_dependency_json(dependency_file_path, source_files);
 
-	cppb::vector<fs::path> object_files;
-	auto const compilation_units = source_files.filter(
-		[source_directory = fs::absolute(build_config.source_directory).lexically_normal()](auto const &source) {
-			auto const source_size     = std::distance(source.file_path.begin(), source.file_path.end());
-			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
-			auto const is_in_source_directory = source_size > source_dir_size
-				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
-			return is_in_source_directory && source_extensions.is_any([&source](auto const extension) {
-				return source.file_path.extension().generic_string() == extension;
-			});
-		}
-	).collect<cppb::vector>();
-
-	int const compilation_units_count_width = [&]() {
-		auto i = compilation_units.size();
-		int result = 0;
-		do
-		{
-			++result;
-			i /= 10;
-		} while (i != 0);
-		return result;
-	}();
-
-	auto const c_compiler = [&]() -> std::string {
-		if (!build_config.c_compiler_path.empty())
-		{
-			return build_config.c_compiler_path.string();
-		}
-		else
-		{
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				return "gcc";
-			case compiler_kind::clang:
-				return "clang";
-			}
-		}
-	}();
-
-	auto const cpp_compiler = [&]() -> std::string {
-		if (!build_config.cpp_compiler_path.empty())
-		{
-			return build_config.cpp_compiler_path.string();
-		}
-		else
-		{
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				return "g++";
-			case compiler_kind::clang:
-				return "clang++";
-			}
-		}
-	}();
-
-	auto const emit_compile_commands = (
-			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
-			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
-		) && [&]() {
-			fs::path const compile_commands_json = "./compile_commands.json";
-			return !fs::exists(compile_commands_json)
-				|| fs::last_write_time(compile_commands_json) < source_files
-					.transform([](auto const &source) { return source.last_modified_time; })
-					.max(fs::file_time_type::min());
-		}();
-	cppb::vector<compile_command> compile_commands;
-	if (emit_compile_commands)
-	{
-		compile_commands.reserve(compilation_units.size());
-	}
-
 	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
-	bool is_any_cpp = false;
 	if (!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
 	{
-		cppb::vector<process_result> compilation_results;
-		cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
-		auto const is_any_future_finished = [&compilation_futures]() {
-			for (auto const &[index, future] : compilation_futures)
-			{
-				using namespace std::chrono_literals;
-				if (future.wait_for(0ms) == std::future_status::ready)
-				{
-					return true;
-				}
-			}
-			return false;
-		};
-
-		auto const get_finished_future = [&compilation_futures]() {
-			using namespace std::chrono_literals;
-			return std::find_if(
-				compilation_futures.begin(), compilation_futures.end(),
-				[](auto const &index_future) {
-					return index_future.second.wait_for(0ms) == std::future_status::ready;
-				}
-			);
-		};
-
-		compilation_results.resize(compilation_units.size());
-
-		// source file compilation
-		for (std::size_t i = 0; i < compilation_units.size(); ++i)
-		{
-			auto const &source = compilation_units[i];
-			auto const &source_file = source.file_path;
-			auto const is_c_source = source_file.extension() == ".c";
-			if (!is_c_source)
-			{
-				is_any_cpp = true;
-			}
-			object_files.emplace_back(intermediate_bin_directory / source_file.filename());
-			object_files.back() += ".o";
-			auto const &object_file = object_files.back();
-
-
-			if (
-				auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
-				ctcli::option_value<ctcli::option("build --rebuild")>
-				|| object_last_write_time < source.last_modified_time
-				|| object_last_write_time < config_last_update
-			)
-			{
-				auto const source_file_name = source_file.generic_string();
-				auto const relative_source_file_name = fs::relative(source_file).generic_string();
-				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
-
-				if (emit_compile_commands)
-				{
-					compile_commands.push_back({ source_file_name, args });
-				}
-
-				if (compilation_futures.size() == job_count)
-				{
-					while (!is_any_future_finished())
-					{
-						using namespace std::chrono_literals;
-						compilation_futures.front().second.wait_for(10ms);
-					}
-					auto const finished = get_finished_future();
-					assert(finished != compilation_futures.end());
-					compilation_results[finished->first] = finished->second.get();
-					compilation_futures.erase(finished);
-				}
-				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-				if (ctcli::option_value<ctcli::option("build --verbose")>)
-				{
-					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
-				}
-				compilation_futures.push_back({ i, std::async(&run_command, is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::null_) });
-			}
-			else if (emit_compile_commands)
-			{
-				auto source_file_name = source_file.generic_string();
-				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
-				compile_commands.push_back({ std::move(source_file_name), std::move(args) });
-			}
-		}
-
-		for (auto &[index, future] : compilation_futures)
-		{
-			compilation_results[index] = future.get();
-		}
-
-		bool is_good = true;
-		assert(compilation_results.size() == compilation_units.size());
-		for (std::size_t i = 0; i < compilation_results.size(); ++i)
-		{
-			auto const result = compilation_results[i];
-			auto const relative_source_file_name = fs::relative(compilation_units[i].file_path).generic_string();
-			if (result.exit_code != 0 || result.error_count != 0 || result.warning_count != 0)
-			{
-				is_good = is_good && result.exit_code == 0 && result.error_count == 0;
-				auto const message = [&]() {
-					if (result.error_count != 0 && result.warning_count != 0)
-					{
-						return fmt::format(
-							"compilation failed with {} error{} and {} warning{}; use '-s' to see compiler output",
-							result.error_count, result.error_count == 1 ? "" : "s",
-							result.warning_count, result.warning_count == 1 ? "" : "s"
-						);
-					}
-					else if (result.error_count != 0)
-					{
-						return fmt::format(
-							"compilation failed with {} error{}; use '-s' to see compiler output",
-							result.error_count, result.error_count == 1 ? "" : "s"
-						);
-					}
-					else if (result.warning_count != 0)
-					{
-						return fmt::format(
-							"{} warning{} emitted by compiler; use '-s' to see compiler output",
-							result.warning_count, result.warning_count == 1 ? "" : "s"
-						);
-					}
-					else // if (result.error_count == 0 && result.warning_cont == 0)
-					{
-						// this shouldn't normally happen, but we handle it anyways
-						return fmt::format("compilation failed with exit code {}; use '-s' to see compiler output", result.exit_code);
-					}
-				}();
-				if (result.exit_code != 0 || result.error_count != 0)
-				{
-					report_error(relative_source_file_name, message);
-				}
-				else
-				{
-					report_warning(relative_source_file_name, message);
-				}
-			}
-		}
-
-		if (!is_good)
-		{
-			return 1;
-		}
+		return build_project_async(
+			project_config.project_name,
+			build_config,
+			source_files,
+			bin_directory,
+			intermediate_bin_directory,
+			config_last_update
+		);
 	}
 	else
 	{
-		// source file compilation
-		for (std::size_t i = 0; i < compilation_units.size(); ++i)
-		{
-			auto const &source = compilation_units[i];
-			auto const &source_file = source.file_path;
-			auto const is_c_source = source_file.extension() == ".c";
-			if (!is_c_source)
-			{
-				is_any_cpp = true;
-			}
-			object_files.emplace_back(intermediate_bin_directory / source_file.filename());
-			object_files.back() += ".o";
-			auto const &object_file = object_files.back();
-
-			if (
-				auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
-				ctcli::option_value<ctcli::option("build --rebuild")>
-				|| object_last_write_time < source.last_modified_time
-				|| object_last_write_time < config_last_update
-			)
-			{
-				auto const source_file_name = source_file.generic_string();
-				auto const relative_source_file_name = fs::relative(source_file).generic_string();
-				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
-
-				if (emit_compile_commands)
-				{
-					compile_commands.push_back({ source_file_name, args });
-				}
-
-				fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-				if (ctcli::option_value<ctcli::option("build --verbose")>)
-				{
-					print_command(is_c_source ? c_compiler : cpp_compiler, std::move(args));
-				}
-				auto const result = run_command(is_c_source ? c_compiler : cpp_compiler, std::move(args), output_kind::stderr_);
-				if (result.exit_code != 0)
-				{
-					return 1;
-				}
-			}
-			else if (emit_compile_commands)
-			{
-				auto source_file_name = source_file.generic_string();
-				auto args = get_compiler_args(build_config, source_file_name, object_file.generic_string());
-				compile_commands.push_back({ std::move(source_file_name), std::move(args) });
-			}
-		}
+		return build_project_sequential(
+			project_config.project_name,
+			build_config,
+			source_files,
+			bin_directory,
+			intermediate_bin_directory,
+			config_last_update
+		);
 	}
-
-	if (compile_commands.size() != 0)
-	{
-		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
-		write_compile_commands_json(compile_commands);
-	}
-
-	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = [&]() -> std::string {
-#ifdef _WIN32
-		if (project_config.project_name == "default")
-		{
-			return fmt::format("{}.exe", project_directory_name);
-		}
-		else
-		{
-			return fmt::format("{}-{}.exe", project_config.project_name, project_directory_name);
-		}
-#else
-		if (project_config.project_name == "default")
-		{
-			return project_directory_name;
-		}
-		else
-		{
-			return fmt::format("{}-{}", project_config.project_name, project_directory_name);
-		}
-#endif // windows
-	}();
-
-	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
-	auto const last_object_write_time = object_files
-		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
-		.max(fs::file_time_type::min());
-	if (
-		ctcli::option_value<ctcli::option("build --link")>
-		|| !fs::exists(executable_file)
-		|| fs::last_write_time(executable_file) < last_object_write_time
-	)
-	{
-		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
-		fmt::print("linking {}\n", relative_executable_file_name);
-		cppb::vector<std::string> link_args;
-		link_args.emplace_back("-o");
-		link_args.emplace_back(executable_file.generic_string());
-		for (auto const &object_file : object_files)
-		{
-			link_args.emplace_back(object_file.generic_string());
-		}
-		add_link_flags(link_args, build_config);
-
-		if (ctcli::option_value<ctcli::option("build -v")>)
-		{
-			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
-		}
-		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
-		if (result.exit_code != 0)
-		{
-			return result.exit_code;
-		}
-	}
-
-	return 0;
 }
 
 static int run_project(project_config const &project_config)

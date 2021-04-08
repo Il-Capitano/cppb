@@ -40,6 +40,7 @@
 			"linux-release": {},
 			"windows": {},
 			"linux": {
+				"compiler": "clang-11",
 				"emit_compile_commands": false,
 				"link_flags": [ "-lpthread" ]
 			},

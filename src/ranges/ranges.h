@@ -67,6 +67,20 @@ struct collection_base_is_any
 };
 
 template<typename Range>
+struct range_base_is_all
+{
+	template<typename Func>
+	bool is_all(Func &&func) const noexcept;
+};
+
+template<typename Collection>
+struct collection_base_is_all
+{
+	template<typename Func>
+	bool is_all(Func &&func) const noexcept;
+};
+
+template<typename Range>
 struct range_base_for_each
 {
 	template<typename Func>
@@ -125,6 +139,7 @@ struct range_base :
 	detail::range_base_transform<Range>,
 	detail::range_base_collect  <Range>,
 	detail::range_base_is_any   <Range>,
+	detail::range_base_is_all   <Range>,
 	detail::range_base_for_each <Range>,
 	detail::range_base_sum      <Range>,
 	detail::range_base_max      <Range>
@@ -135,6 +150,7 @@ struct collection_base :
 	detail::collection_base_filter   <Collection>,
 	detail::collection_base_transform<Collection>,
 	detail::collection_base_is_any   <Collection>,
+	detail::collection_base_is_all   <Collection>,
 	detail::collection_base_for_each <Collection>,
 	detail::collection_base_sum      <Collection>,
 	detail::collection_base_max      <Collection>,
@@ -498,6 +514,26 @@ template<typename Collection>
 template<typename Func>
 bool collection_base_is_any<Collection>::is_any(Func &&func) const noexcept
 { return static_cast<Collection const *>(this)->as_range().is_any(std::forward<Func>(func)); }
+
+template<typename Range>
+template<typename Func>
+bool range_base_is_all<Range>::is_all(Func &&func) const noexcept
+{
+	auto const self = static_cast<Range const *>(this);
+	for (auto &&it : *self)
+	{
+		if (!func(std::forward<decltype(it)>(it)))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+template<typename Collection>
+template<typename Func>
+bool collection_base_is_all<Collection>::is_all(Func &&func) const noexcept
+{ return static_cast<Collection const *>(this)->as_range().is_all(std::forward<Func>(func)); }
 
 template<typename Range>
 template<typename Func>

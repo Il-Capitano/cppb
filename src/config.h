@@ -11,10 +11,14 @@ enum class compiler_kind
 struct config
 {
 	compiler_kind compiler = compiler_kind::gcc;
+	int compiler_version = -1;
 	fs::path c_compiler_path;
 	fs::path cpp_compiler_path;
 	std::string c_standard;
 	std::string cpp_standard;
+
+	fs::path cpp_precompiled_header;
+	fs::path c_precompiled_header;
 
 	cppb::vector<std::string> c_compiler_flags;
 	cppb::vector<std::string> cpp_compiler_flags;
@@ -41,15 +45,23 @@ struct config_is_set
 	bool c_standard        = false;
 	bool cpp_standard      = false;
 
+	bool cpp_precompiled_header;
+	bool c_precompiled_header;
+
+	bool c_compiler_flags   = false;
+	bool cpp_compiler_flags = false;
+	bool link_flags         = false;
+	bool libraries          = false;
+
+	bool run_args = false;
+
 	bool source_directory = false;
 
-//	cppb::vector<fs::path> include_paths;
-//	cppb::vector<fs::path> library_paths;
-//	cppb::vector<std::string> libraries;
+	bool include_paths = false;
 
-//	cppb::vector<std::string> defines;
-//	cppb::vector<std::string> warnings;
-	bool optimization = false;
+	bool defines               = false;
+	bool warnings              = false;
+	bool optimization          = false;
 	bool emit_compile_commands = false;
 };
 

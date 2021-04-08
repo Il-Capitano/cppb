@@ -116,17 +116,16 @@ template<auto config::*member, auto config_is_set::*is_set_member>
 static void fill_config_member(rapidjson::Value::ConstObject object, char const *name, config &config, config_is_set &config_is_set, std::string &error)
 {
 	static_assert(member != nullptr);
-
-	if (is_set_member != nullptr && config_is_set.*is_set_member)
-	{
-		return;
-	}
+	static_assert(is_set_member != nullptr);
 
 	if (auto const it = object.FindMember(name); it != object.MemberEnd())
 	{
 		if constexpr (std::is_same_v<decltype(member), bool config::*>)
 		{
-			static_assert(is_set_member != nullptr);
+			if (config_is_set.*is_set_member)
+			{
+				return;
+			}
 			if (!it->value.IsBool())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be a 'Bool'", name);
@@ -135,8 +134,15 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 			config.*member = it->value.GetBool();
 			config_is_set.*is_set_member = true;
 		}
-		else if constexpr (is_set_member != nullptr)
+		else if constexpr (
+			std::is_same_v<decltype(member), fs::path config::*>
+			|| std::is_same_v<decltype(member), std::string config::*>
+		)
 		{
+			if (config_is_set.*is_set_member)
+			{
+				return;
+			}
 			if (!it->value.IsString())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be a 'String'", name);
@@ -147,6 +153,10 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 		}
 		else
 		{
+			static_assert(
+				std::is_same_v<decltype(member), cppb::vector<fs::path> config::*>
+				|| std::is_same_v<decltype(member), cppb::vector<std::string> config::*>
+			);
 			if (!it->value.IsArray())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be an 'Array'", name);
@@ -162,8 +172,20 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 				}
 				(config.*member).emplace_back(elem.GetString());
 			}
+			config_is_set.*is_set_member = true;
 		}
 	}
+}
+
+static int parse_int(std::string_view str)
+{
+	int result = 0;
+	for (auto const c : str)
+	{
+		result *= 10;
+		result += c - '0';
+	}
+	return result;
 }
 
 static void fill_config(rapidjson::Value::ConstObject object, config &config, config_is_set &config_is_set, std::string &error)
@@ -178,15 +200,45 @@ static void fill_config(rapidjson::Value::ConstObject object, config &config, co
 				return;
 			}
 			std::string_view const compiler = compiler_it->value.GetString();
-			if (compiler == "gcc" || compiler == "g++" || compiler == "GCC")
+			if (compiler.starts_with("gcc") || compiler.starts_with("g++") || compiler.starts_with("GCC"))
 			{
 				config.compiler = compiler_kind::gcc;
 				config_is_set.compiler = true;
+				auto const version_string = compiler.substr(3);
+				if (!version_string.empty() && !(
+					version_string.starts_with('-')
+					&& version_string.size() > 1
+					&& ranges::basic_range{ version_string.begin() + 1, version_string.end() }
+						.is_all([](auto const c) { return c >= '0' && c <= '9'; })
+				))
+				{
+					error = fmt::format("invalid version specifier '{}' for member 'compiler' in configuration file", version_string);
+					return;
+				}
+				else if (!version_string.empty())
+				{
+					config.compiler_version = parse_int(version_string.substr(1));
+				}
 			}
-			else if (compiler == "clang" || compiler == "clang++" || compiler == "Clang")
+			else if (compiler.starts_with("clang") /* || compiler.starts_with("clang++") */ || compiler.starts_with("Clang"))
 			{
 				config.compiler = compiler_kind::clang;
 				config_is_set.compiler = true;
+				auto const version_string = compiler.starts_with("clang++") ? compiler.substr(7) : compiler.substr(5);
+				if (!version_string.empty() && !(
+					version_string.starts_with('-')
+					&& version_string.size() > 1
+					&& ranges::basic_range{ version_string.begin() + 1, version_string.end() }
+						.is_all([](auto const c) { return c >= '0' && c <= '9'; })
+				))
+				{
+					error = fmt::format("invalid version specifier '{}' for member 'compiler' in configuration file", version_string);
+					return;
+				}
+				else if (!version_string.empty())
+				{
+					config.compiler_version = parse_int(version_string.substr(1));
+				}
 			}
 			else
 			{
@@ -199,7 +251,7 @@ static void fill_config(rapidjson::Value::ConstObject object, config &config, co
 #define fill_regular_config_member(member) \
 fill_config_member<&config::member, &config_is_set::member>(object, #member, config, config_is_set, error)
 #define fill_array_config_member(member) \
-fill_config_member<&config::member, static_cast<bool config_is_set::*>(nullptr)>(object, #member, config, config_is_set, error)
+fill_config_member<&config::member, &config_is_set::member>(object, #member, config, config_is_set, error)
 
 	fill_regular_config_member(c_compiler_path);
 	if (!error.empty()) { return; }
@@ -208,6 +260,11 @@ fill_config_member<&config::member, static_cast<bool config_is_set::*>(nullptr)>
 	fill_regular_config_member(c_standard);
 	if (!error.empty()) { return; }
 	fill_regular_config_member(cpp_standard);
+	if (!error.empty()) { return; }
+
+	fill_regular_config_member(cpp_precompiled_header);
+	if (!error.empty()) { return; }
+	fill_regular_config_member(c_precompiled_header);
 	if (!error.empty()) { return; }
 
 	fill_array_config_member(c_compiler_flags);
@@ -241,15 +298,48 @@ fill_config_member<&config::member, static_cast<bool config_is_set::*>(nullptr)>
 #undef fill_array_config_member
 }
 
-static void fill_default_config_values(config &config, config_is_set config_is_set)
+static void fill_default_config_values(config &values, config_is_set values_is_set)
 {
 #define fill_default_value(member, default_value) \
-do { if (!config_is_set.member) { config.member = default_value; } } while (false)
+do { if (!values_is_set.member) { values.member = default_value; } } while (false)
 
 	fill_default_value(compiler, compiler_kind::gcc);
 	fill_default_value(c_standard, "c11");
 	fill_default_value(cpp_standard, "c++20");
 	fill_default_value(source_directory, "src");
+
+#undef fill_default_value
+}
+
+static void fill_default_config_values_with(config &values, config_is_set values_is_set, config const &source_values)
+{
+#define fill_default_value(member) \
+do { if (!values_is_set.member) { values.member = source_values.member; } } while (false)
+
+	fill_default_value(compiler);
+	if (!values_is_set.compiler) { values.compiler_version = source_values.compiler_version; }
+	fill_default_value(c_compiler_path);
+	fill_default_value(cpp_compiler_path);
+	fill_default_value(c_standard);
+	fill_default_value(cpp_standard);
+
+	fill_default_value(cpp_precompiled_header);
+	fill_default_value(c_precompiled_header);
+
+	fill_default_value(c_compiler_flags);
+	fill_default_value(cpp_compiler_flags);
+	fill_default_value(link_flags);
+	fill_default_value(libraries);
+	fill_default_value(run_args);
+
+	fill_default_value(source_directory);
+
+	fill_default_value(include_paths);
+
+	fill_default_value(defines);
+	fill_default_value(warnings);
+	fill_default_value(optimization);
+	fill_default_value(emit_compile_commands);
 
 #undef fill_default_value
 }
@@ -290,14 +380,12 @@ static void resolve_project_config(
 	config_object.state = resolve_state::resolving;
 	config.project_name = config_object.name;
 
-	bool needs_default_values = true;
+	project_config *depends_on_config = nullptr;
 	if (
 		auto const depends_on_it = config_object.json_object.FindMember("depends_on");
 		depends_on_it != config_object.json_object.MemberEnd()
 	)
 	{
-		needs_default_values = false;
-
 		if (!depends_on_it->value.IsString())
 		{
 			error = "value of member 'depends_on' in configuration file must be a 'String'";
@@ -328,10 +416,7 @@ static void resolve_project_config(
 			return;
 		}
 
-		config.windows_debug   = it->config->windows_debug;
-		config.windows_release = it->config->windows_release;
-		config.linux_debug   = it->config->linux_debug;
-		config.linux_release = it->config->linux_release;
+		depends_on_config = it->config;
 	}
 
 	if (auto const configs_it = object.FindMember("configs"); configs_it != object.MemberEnd())
@@ -519,7 +604,7 @@ static void resolve_project_config(
 
 	config_object.state = resolve_state::all;
 
-	if (needs_default_values)
+	if (depends_on_config == nullptr)
 	{
 		fill_default_config_values(config.windows_debug,   is_set.windows_debug);
 		fill_default_config_values(config.windows_release, is_set.windows_release);
@@ -541,6 +626,13 @@ static void resolve_project_config(
 		{
 			config.linux_release.optimization = "3";
 		}
+	}
+	else
+	{
+		fill_default_config_values_with(config.windows_debug,   is_set.windows_debug,   depends_on_config->windows_debug);
+		fill_default_config_values_with(config.windows_release, is_set.windows_release, depends_on_config->windows_release);
+		fill_default_config_values_with(config.linux_debug,   is_set.linux_debug,   depends_on_config->linux_debug);
+		fill_default_config_values_with(config.linux_release, is_set.linux_release, depends_on_config->linux_release);
 	}
 }
 
