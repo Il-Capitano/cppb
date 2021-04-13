@@ -833,8 +833,8 @@ static int build_project_sequential(
 
 			cpp_compiler_args.emplace_back("-o");
 			cpp_compiler_args.emplace_back(pch_file_name);
-			c_compiler_args.emplace_back("-x");
-			c_compiler_args.emplace_back("c++-header");
+			cpp_compiler_args.emplace_back("-x");
+			cpp_compiler_args.emplace_back("c++-header");
 			cpp_compiler_args.emplace_back(header_file_name);
 
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
