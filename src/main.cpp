@@ -350,19 +350,23 @@ static int build_project_async(
 			{
 				return 1;
 			}
+			if (fs::exists(pch_file))
+			{
+				c_pch_last_update = fs::last_write_time(pch_file);
+			}
 
 			c_compiler_args.resize(common_c_flags.size());
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				break;
-			case compiler_kind::clang:
-				common_c_flags.emplace_back("-include-pch");
-				common_c_flags.emplace_back(pch_file_name);
-				c_compiler_args.emplace_back("-include-pch");
-				c_compiler_args.emplace_back(pch_file_name);
-				break;
-			}
+		}
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			break;
+		case compiler_kind::clang:
+			common_c_flags.emplace_back("-include-pch");
+			common_c_flags.emplace_back(pch_file.generic_string());
+			c_compiler_args.emplace_back("-include-pch");
+			c_compiler_args.emplace_back(pch_file.generic_string());
+			break;
 		}
 	}
 	if (!build_config.cpp_precompiled_header.empty())
@@ -429,19 +433,23 @@ static int build_project_async(
 			{
 				return 1;
 			}
+			if (fs::exists(pch_file))
+			{
+				cpp_pch_last_update = fs::last_write_time(pch_file);
+			}
 
 			cpp_compiler_args.resize(common_cpp_flags.size());
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				break;
-			case compiler_kind::clang:
-				common_cpp_flags.emplace_back("-include-pch");
-				common_cpp_flags.emplace_back(pch_file_name);
-				cpp_compiler_args.emplace_back("-include-pch");
-				cpp_compiler_args.emplace_back(pch_file_name);
-				break;
-			}
+		}
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			break;
+		case compiler_kind::clang:
+			common_cpp_flags.emplace_back("-include-pch");
+			common_cpp_flags.emplace_back(pch_file.generic_string());
+			cpp_compiler_args.emplace_back("-include-pch");
+			cpp_compiler_args.emplace_back(pch_file.generic_string());
+			break;
 		}
 	}
 
@@ -770,19 +778,23 @@ static int build_project_sequential(
 			{
 				return 1;
 			}
+			if (fs::exists(pch_file))
+			{
+				c_pch_last_update = fs::last_write_time(pch_file);
+			}
 
 			c_compiler_args.resize(common_c_flags.size());
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				break;
-			case compiler_kind::clang:
-				common_c_flags.emplace_back("-include-pch");
-				common_c_flags.emplace_back(pch_file_name);
-				c_compiler_args.emplace_back("-include-pch");
-				c_compiler_args.emplace_back(pch_file_name);
-				break;
-			}
+		}
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			break;
+		case compiler_kind::clang:
+			common_c_flags.emplace_back("-include-pch");
+			common_c_flags.emplace_back(pch_file.generic_string());
+			c_compiler_args.emplace_back("-include-pch");
+			c_compiler_args.emplace_back(pch_file.generic_string());
+			break;
 		}
 	}
 	if (!build_config.cpp_precompiled_header.empty())
@@ -849,19 +861,23 @@ static int build_project_sequential(
 			{
 				return 1;
 			}
+			if (fs::exists(pch_file))
+			{
+				cpp_pch_last_update = fs::last_write_time(pch_file);
+			}
 
 			cpp_compiler_args.resize(common_cpp_flags.size());
-			switch (build_config.compiler)
-			{
-			case compiler_kind::gcc:
-				break;
-			case compiler_kind::clang:
-				common_cpp_flags.emplace_back("-include-pch");
-				common_cpp_flags.emplace_back(pch_file_name);
-				cpp_compiler_args.emplace_back("-include-pch");
-				cpp_compiler_args.emplace_back(pch_file_name);
-				break;
-			}
+		}
+		switch (build_config.compiler)
+		{
+		case compiler_kind::gcc:
+			break;
+		case compiler_kind::clang:
+			common_cpp_flags.emplace_back("-include-pch");
+			common_cpp_flags.emplace_back(pch_file.generic_string());
+			cpp_compiler_args.emplace_back("-include-pch");
+			cpp_compiler_args.emplace_back(pch_file.generic_string());
+			break;
 		}
 	}
 
