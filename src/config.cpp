@@ -86,7 +86,7 @@ static cppb::vector<std::string> get_library_libs(std::string_view library)
 			auto const llvm_config = library.size() == 4
 				? std::string("llvm-config")
 				: "llvm-config" + std::string(library.substr(4));
-			return capture_command_output(llvm_config, {{ "--ldflags", "--libs" }});
+			return capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }});
 		}
 		else
 		{
