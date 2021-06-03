@@ -289,6 +289,14 @@ fill_config_member<&config::member, &config_is_set::member>(object, #member, con
 	if (!error.empty()) { return; }
 	fill_array_config_member(warnings);
 	if (!error.empty()) { return; }
+
+	fill_array_config_member(prebuild_rules);
+	if (!error.empty()) { return; }
+	fill_array_config_member(prelink_rules);
+	if (!error.empty()) { return; }
+	fill_array_config_member(postbuild_rules);
+	if (!error.empty()) { return; }
+
 	fill_regular_config_member(optimization);
 	if (!error.empty()) { return; }
 	fill_regular_config_member(emit_compile_commands);
@@ -338,6 +346,11 @@ do { if (!values_is_set.member) { values.member = source_values.member; } } whil
 
 	fill_default_value(defines);
 	fill_default_value(warnings);
+
+	fill_default_value(prebuild_rules);
+	fill_default_value(prelink_rules);
+	fill_default_value(postbuild_rules);
+
 	fill_default_value(optimization);
 	fill_default_value(emit_compile_commands);
 
@@ -636,34 +649,10 @@ static void resolve_project_config(
 	}
 }
 
-cppb::vector<project_config> read_config_json(fs::path const &dep_file_path, std::string &error)
+static cppb::vector<project_config> get_project_configs(rapidjson::Document::Object object, std::string &error)
 {
-	std::ifstream input(dep_file_path);
-	if (!input.is_open())
-	{
-		error = fmt::format("could not open file '{}'", dep_file_path.generic_string());
-		return {};
-	}
-
-	rapidjson::IStreamWrapper input_wrapper(input);
-	rapidjson::Document d;
-	d.ParseStream(input_wrapper);
-
-	if (d.HasParseError())
-	{
-		error = fmt::format("an error occurred while parsing '{}'", dep_file_path.generic_string());
-		return {};
-	}
-
-	if (!d.IsObject())
-	{
-		error = "top level value in configuration file must be an 'Object'";
-		return {};
-	}
-
 	cppb::vector<config_object_pair> config_objects = [&]() {
 		cppb::vector<config_object_pair> result;
-		auto const object = d.GetObject();
 		auto const begin = object.begin();
 		auto const end   = object.end();
 		for (auto it = begin; it.operator->() != end.operator->(); ++it)
@@ -699,6 +688,187 @@ cppb::vector<project_config> read_config_json(fs::path const &dep_file_path, std
 		{
 			return {};
 		}
+	}
+
+	return result;
+}
+
+static cppb::vector<std::string> get_string_array(rapidjson::Document::Array array, std::string &error)
+{
+	cppb::vector<std::string> result;
+	result.reserve(array.Size());
+	for (auto const &element : array)
+	{
+		if (!element.IsString())
+		{
+			error = "array element must be a 'String'";
+			return {};
+		}
+		result.push_back(element.GetString());
+	}
+
+	return result;
+}
+
+static rule get_rule(std::string_view name, rapidjson::Document::Object object, std::string &error)
+{
+	rule result;
+	result.rule_name = name;
+
+	auto const end = object.MemberEnd().operator->();
+	// dependencies
+	auto const dependencies_it = object.FindMember("dependencies");
+	if (dependencies_it.operator->() != end)
+	{
+		if (!dependencies_it->value.IsArray())
+		{
+			error = "value for member 'dependencies' must be an 'Array'";
+			return {};
+		}
+		result.dependencies = get_string_array(dependencies_it->value.GetArray(), error);
+		if (!error.empty())
+		{
+			return {};
+		}
+	}
+
+	// command or commands
+	auto const command_it = object.FindMember("command");
+	auto const commands_it = object.FindMember("commands");
+	if (command_it.operator->() != end && commands_it.operator->() != end)
+	{
+		error = "only one of 'command' or 'commands' may be provided in a rule";
+		return {};
+	}
+	else if (command_it.operator->() != end)
+	{
+		if (!command_it->value.IsString())
+		{
+			error = "value for member 'command' must be a 'String'";
+			return {};
+		}
+		result.commands.push_back(command_it->value.GetString());
+	}
+	else if (commands_it.operator->() != end)
+	{
+		if (!commands_it->value.IsArray())
+		{
+			error = "value for member 'commands' must be an 'Array'";
+			return {};
+		}
+		result.commands = get_string_array(commands_it->value.GetArray(), error);
+		if (!error.empty())
+		{
+			return {};
+		}
+	}
+
+	// is_file
+	auto const is_file_it = object.FindMember("is_file");
+	if (is_file_it.operator->() != end)
+	{
+		if (!is_file_it->value.IsBool())
+		{
+			error = "value for member 'is_file' must be a 'Bool'";
+			return {};
+		}
+		result.is_file = is_file_it->value.GetBool();
+	}
+
+	return result;
+}
+
+static cppb::vector<rule> get_rules(rapidjson::Document::Object object, std::string &error)
+{
+	cppb::vector<rule> result;
+
+	result.reserve(object.MemberCount());
+	auto it = object.MemberBegin();
+	auto const end = object.MemberEnd();
+	for (; it.operator->() != end.operator->(); ++it)
+	{
+		auto &[name, value] = *it;
+
+		assert(name.IsString());
+		if (!value.IsObject())
+		{
+			error = "array element in 'rules' must be an 'Object'";
+			return {};
+		}
+
+		result.push_back(get_rule(name.GetString(), value.GetObject(), error));
+		if (!error.empty())
+		{
+			return {};
+		}
+	}
+
+	return result;
+}
+
+config_file read_config_json(fs::path const &dep_file_path, std::string &error)
+{
+	std::ifstream input(dep_file_path);
+	if (!input.is_open())
+	{
+		error = fmt::format("could not open file '{}'", dep_file_path.generic_string());
+		return {};
+	}
+
+	rapidjson::IStreamWrapper input_wrapper(input);
+	rapidjson::Document document;
+	document.ParseStream(input_wrapper);
+
+	if (document.HasParseError())
+	{
+		error = fmt::format("an error occurred while parsing '{}'", dep_file_path.generic_string());
+		return {};
+	}
+
+	if (!document.IsObject())
+	{
+		error = "top level value in configuration file must be an 'Object'";
+		return {};
+	}
+
+	auto const object = document.GetObject();
+	auto result = config_file{};
+
+	auto const projects_object_it = object.FindMember("projects");
+	if (projects_object_it.operator->() == object.MemberEnd().operator->())
+	{
+		error = "unable to find 'projects' field in configuration file";
+		return {};
+	}
+
+	if (!projects_object_it->value.IsObject())
+	{
+		error = "configuration value for member 'projects' must be an 'Object'";
+		return {};
+	}
+
+	result.projects = get_project_configs(projects_object_it->value.GetObject(), error);
+	if (!error.empty())
+	{
+		return {};
+	}
+
+	auto const rules_object_it = object.FindMember("rules");
+	if (rules_object_it.operator->() == object.MemberEnd().operator->())
+	{
+		return result;
+	}
+
+	if (!rules_object_it->value.IsObject())
+	{
+		error = "configuration value for member 'rules' must be an 'Object'";
+		return {};
+	}
+
+	result.rules = get_rules(rules_object_it->value.GetObject(), error);
+	if (!error.empty())
+	{
+		return {};
 	}
 
 	return result;

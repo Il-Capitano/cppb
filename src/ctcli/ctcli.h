@@ -1,7 +1,6 @@
 #ifndef CTCLI_CTCLI_H
 #define CTCLI_CTCLI_H
 
-#include <bits/c++config.h>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -35,7 +34,7 @@
 namespace ctcli
 {
 
-#if __cplusplus < 202002L
+#if __cplusplus < 202002L || defined(__clang__)
 
 struct string_view : std::string_view
 {
@@ -1300,13 +1299,13 @@ constexpr commands_id_t get_commands_id_t(command_index_t index) noexcept
 }
 
 template<group_id_t ID>
-static constexpr auto help_group_element_index = (assert(add_help_to_group<ID>), create_group_element_index(ID, option_group<ID>.size()));
+static constexpr auto help_group_element_index = (std::enable_if_t<add_help_to_group<ID>, int>{}, create_group_element_index(ID, option_group<ID>.size()));
 
 template<options_id_t ID>
-static constexpr auto help_option_index = (assert(add_help_option<ID>), create_option_index(ID, command_line_options<ID>.size()));
+static constexpr auto help_option_index = (std::enable_if_t<add_help_option<ID>, int>{}, create_option_index(ID, command_line_options<ID>.size()));
 
 template<options_id_t ID>
-static constexpr auto verbose_option_index = (assert(add_verbose_option<ID>), create_option_index(ID, command_line_options<ID>.size() + (add_help_option<ID> ? 1 : 0)));
+static constexpr auto verbose_option_index = (std::enable_if_t<add_verbose_option<ID>, int>{}, create_option_index(ID, command_line_options<ID>.size() + (add_help_option<ID> ? 1 : 0)));
 
 template<commands_id_t ID>
 static constexpr auto help_command_index = create_command_index(ID, command_line_commands<ID>.size());

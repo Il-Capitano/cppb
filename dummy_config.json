@@ -10,7 +10,7 @@
 			"cpp_compiler_flags": [],
 			"link_flags": [ "-fuse-ld=lld" ],
 
-			"run_args": [ "build", "--build-mode", "release", "--rebuild", "--config-file", "dummy_config.json" ],
+			"run_args": [ "build", "--build-mode", "release", "--rebuild" ],
 
 			"source_directory": "src",
 
@@ -29,6 +29,9 @@
 				"no-unused-template",
 				"no-zero-as-null-pointer-constant"
 			],
+			"prebuild_rules": [ "ryu_format.o" ],
+			"prelink_rules": [],
+			"postbuild_rules": [],
 
 			"configs": {
 				"windows-debug": {},
@@ -55,6 +58,13 @@
 					"optimization": "3"
 				}
 			}
+		}
+	},
+	"rules": {
+		"ryu_format.o": {
+			"dependencies": [ "ryu_format.ll" ],
+			"command": "llc ryu_format.ll -filetype=obj -o ryu_format.o",
+			"is_file": true
 		}
 	}
 }

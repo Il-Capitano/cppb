@@ -33,6 +33,11 @@ struct config
 
 	cppb::vector<std::string> defines;
 	cppb::vector<std::string> warnings;
+
+	cppb::vector<std::string> prebuild_rules;
+	cppb::vector<std::string> prelink_rules;
+	cppb::vector<std::string> postbuild_rules;
+
 	std::string optimization;
 	bool emit_compile_commands = false;
 };
@@ -61,6 +66,11 @@ struct config_is_set
 
 	bool defines               = false;
 	bool warnings              = false;
+
+	bool prebuild_rules  = false;
+	bool prelink_rules   = false;
+	bool postbuild_rules = false;
+
 	bool optimization          = false;
 	bool emit_compile_commands = false;
 };
@@ -82,7 +92,21 @@ struct project_config_is_set
 	config_is_set linux_release;
 };
 
-cppb::vector<project_config> read_config_json(fs::path const &config_file_path, std::string &error);
+struct rule
+{
+	std::string               rule_name{};
+	cppb::vector<std::string> dependencies{};
+	cppb::vector<std::string> commands{};
+	bool                      is_file = true;
+};
+
+struct config_file
+{
+	cppb::vector<project_config> projects{};
+	cppb::vector<rule>           rules{};
+};
+
+config_file read_config_json(fs::path const &config_file_path, std::string &error);
 void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config);
 void add_cpp_compiler_flags(cppb::vector<std::string> &args, config const &config);
 void add_link_flags(cppb::vector<std::string> &args, config const &config);

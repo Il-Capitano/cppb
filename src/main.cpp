@@ -88,6 +88,44 @@ static void report_warning(std::string_view site, std::string_view message)
 
 #endif // windows
 
+static std::pair<int, bool> run_rule(
+	std::string_view point_name,  // pre-build, pre-link, post-build
+	std::string_view rule_to_run,
+	cppb::vector<rule> const &rules,
+	std::string &error
+)
+{
+	auto const it = std::find_if(rules.begin(), rules.end(), [rule_to_run](auto const &rule) {
+		return rule_to_run == rule.rule_name;
+	});
+	if (it == rules.end())
+	{
+		error = fmt::format("unknown rule '{}'", rule_to_run);
+		return {};
+	}
+	return {};
+}
+
+static std::pair<int, bool> run_rules(
+	std::string_view point_name,  // pre-build, pre-link, post-build
+	cppb::vector<std::string> const &rules_to_run,
+	cppb::vector<rule> const &rules,
+	std::string &error
+)
+{
+	bool any_rules_run = false;
+	for (auto const &rule_to_run : rules_to_run)
+	{
+		auto const [exit_code, any_run] = run_rule(point_name, rule_to_run, rules, error);
+		any_rules_run |= any_run;
+		if (exit_code != 0 || !error.empty())
+		{
+			return { exit_code, any_rules_run };
+		}
+	}
+	return { 0, any_rules_run };
+}
+
 static void print_command(std::string_view executable, cppb::vector<std::string> const &arguments)
 {
 	std::string command{ executable };
@@ -1266,14 +1304,14 @@ int main(int argc, char const **argv)
 		std::string error;
 
 		auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
-		auto const project_configs = read_config_json(config_file_path, error);
+		auto const [project_configs, rules] = read_config_json(config_file_path, error);
 		if (!error.empty())
 		{
 			report_error(config_file_path.generic_string(), error);
 			return 1;
 		}
 
-		auto const &project_config = [&]() -> auto & {
+		auto const &project_config = [&project_configs = project_configs]() -> auto & {
 			std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
 			auto const it = std::find_if(
 				project_configs.begin(), project_configs.end(),
@@ -1298,14 +1336,14 @@ int main(int argc, char const **argv)
 		std::string error;
 
 		auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
-		auto const project_configs = read_config_json(config_file_path, error);
+		auto const [project_configs, rules] = read_config_json(config_file_path, error);
 		if (!error.empty())
 		{
 			report_error(config_file_path.generic_string(), error);
 			return 1;
 		}
 
-		auto const &project_config = [&]() -> auto & {
+		auto const &project_config = [&project_configs = project_configs]() -> auto & {
 			std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
 			auto const it = std::find_if(
 				project_configs.begin(), project_configs.end(),

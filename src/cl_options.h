@@ -14,7 +14,7 @@ inline constexpr bool ctcli::add_verbose_option<build_options> = true;
 template<>
 inline constexpr std::array ctcli::command_line_options<build_options> = {
 	ctcli::create_option("--config-file <path>",         "Set configuration file path (default=.cppb/config.json)", ctcli::arg_type::string),
-	ctcli::create_option("--cppb-dir <dir>",             "Set directory used by cppb (default=.cppb)",              ctcli::arg_type::string),
+	ctcli::create_option("--cppb-dir <dir>",             "Set directory used for chaching (default=.cppb)",         ctcli::arg_type::string),
 	ctcli::create_option("--bin-dir <dir>",              "Set binary output directory to dir> (default=bin)",       ctcli::arg_type::string),
 	ctcli::create_option("--build-config <config>",      "Set which build configuration to use (default=default)",  ctcli::arg_type::string),
 	ctcli::create_option("--build-mode {debug|release}", "Set build mode (default=debug)"),
