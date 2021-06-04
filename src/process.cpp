@@ -122,6 +122,18 @@ static process_result run_process_without_capture(std::string command, output_ki
 
 #endif // windows
 
+process_result run_command(std::string_view command, output_kind output)
+{
+	if (output == output_kind::null_)
+	{
+		return run_process_with_capture(std::string(command), output);
+	}
+	else
+	{
+		return run_process_without_capture(std::string(command), output);
+	}
+}
+
 process_result run_command(std::string_view executable, cppb::vector<std::string> const &arguments, output_kind output)
 {
 	std::string command{ executable };
@@ -131,14 +143,7 @@ process_result run_command(std::string_view executable, cppb::vector<std::string
 		command += arg;
 	}
 
-	if (output == output_kind::null_)
-	{
-		return run_process_with_capture(std::move(command), output);
-	}
-	else
-	{
-		return run_process_without_capture(std::move(command), output);
-	}
+	return run_command(command, output);
 }
 
 std::string capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments)

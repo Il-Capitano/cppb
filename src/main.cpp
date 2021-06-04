@@ -88,10 +88,18 @@ static void report_warning(std::string_view site, std::string_view message)
 
 #endif // windows
 
-static std::pair<int, bool> run_rule(
+struct run_rule_result_t
+{
+	int exit_code;
+	bool any_run;
+	fs::file_time_type last_update_time;
+};
+
+static run_rule_result_t run_rule(
 	std::string_view point_name,  // pre-build, pre-link, post-build
 	std::string_view rule_to_run,
 	cppb::vector<rule> const &rules,
+	fs::file_time_type config_last_update,
 	std::string &error
 )
 {
@@ -100,23 +108,70 @@ static std::pair<int, bool> run_rule(
 	});
 	if (it == rules.end())
 	{
-		error = fmt::format("unknown rule '{}'", rule_to_run);
-		return {};
+		auto const rule_path = fs::path(rule_to_run);
+		if (!fs::exists(rule_path))
+		{
+			error = fmt::format("'{}' is not a rule name or a file", rule_to_run);
+			return {};
+		}
+		return { 0, false, fs::last_write_time(rule_path) };
 	}
-	return {};
+
+	run_rule_result_t result = { 0, false, fs::file_time_type::min() };
+	for (auto const &dependency : it->dependencies)
+	{
+		auto const [exit_code, any_run, last_update_time] = run_rule("", dependency, rules, config_last_update, error);
+		if (!error.empty())
+		{
+			return {};
+		}
+		result.any_run |= any_run;
+		result.last_update_time = std::max(result.last_update_time, last_update_time);
+		if (exit_code != 0)
+		{
+			result.exit_code = exit_code;
+			return result;
+		}
+	}
+
+	auto const rule_path = fs::path(rule_to_run);
+	if (
+		!it->is_file
+		|| !fs::exists(rule_path)
+		|| fs::last_write_time(rule_path) < std::max(config_last_update, result.last_update_time)
+	)
+	{
+		result.any_run = true;
+		for (auto const &command : it->commands)
+		{
+			fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
+			auto const [_, __, exit_code] = run_command(command, output_kind::stderr_);
+			if (exit_code != 0)
+			{
+				result.exit_code = exit_code;
+				return result;
+			}
+		}
+		if (it->is_file && fs::exists(rule_path))
+		{
+			result.last_update_time = fs::last_write_time(rule_path);
+		}
+	}
+	return result;
 }
 
 static std::pair<int, bool> run_rules(
 	std::string_view point_name,  // pre-build, pre-link, post-build
 	cppb::vector<std::string> const &rules_to_run,
 	cppb::vector<rule> const &rules,
+	fs::file_time_type config_last_update,
 	std::string &error
 )
 {
 	bool any_rules_run = false;
 	for (auto const &rule_to_run : rules_to_run)
 	{
-		auto const [exit_code, any_run] = run_rule(point_name, rule_to_run, rules, error);
+		auto const [exit_code, any_run, _] = run_rule(point_name, rule_to_run, rules, config_last_update, error);
 		any_rules_run |= any_run;
 		if (exit_code != 0 || !error.empty())
 		{
@@ -237,11 +292,88 @@ static std::string get_cpp_compiler(config const &build_config)
 	}
 }
 
-static int build_project_async(
+struct build_result_t
+{
+	int exit_code;
+	bool any_run;
+	bool any_cpp;
+	cppb::vector<fs::path> object_files;
+};
+
+static int link_project(
 	std::string_view project_name,
 	config const &build_config,
-	cppb::vector<source_file> const &source_files,
 	fs::path const &bin_directory,
+	cppb::vector<fs::path> const &object_files,
+	bool prelink_any_run,
+	bool is_any_cpp
+)
+{
+	auto const c_compiler   = get_c_compiler(build_config);
+	auto const cpp_compiler = get_cpp_compiler(build_config);
+
+	auto const project_directory_name = fs::current_path().filename().generic_string();
+	auto const executable_file_name = [&]() -> std::string {
+#ifdef _WIN32
+		if (project_name == "default")
+		{
+			return fmt::format("{}.exe", project_directory_name);
+		}
+		else
+		{
+			return fmt::format("{}-{}.exe", project_name, project_directory_name);
+		}
+#else
+		if (project_name == "default")
+		{
+			return project_directory_name;
+		}
+		else
+		{
+			return fmt::format("{}-{}", project_name, project_directory_name);
+		}
+#endif // windows
+	}();
+
+	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
+	auto const last_object_write_time = object_files
+		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
+		.max(fs::file_time_type::min());
+	if (
+		ctcli::option_value<ctcli::option("build --link")>
+		|| prelink_any_run
+		|| !fs::exists(executable_file)
+		|| fs::last_write_time(executable_file) < last_object_write_time
+	)
+	{
+		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
+		fmt::print("linking {}\n", relative_executable_file_name);
+		cppb::vector<std::string> link_args;
+		link_args.emplace_back("-o");
+		link_args.emplace_back(executable_file.generic_string());
+		for (auto const &object_file : object_files)
+		{
+			link_args.emplace_back(object_file.generic_string());
+		}
+		add_link_flags(link_args, build_config);
+
+		if (ctcli::option_value<ctcli::option("build -v")>)
+		{
+			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
+		}
+		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
+		if (result.exit_code != 0)
+		{
+			return result.exit_code;
+		}
+	}
+
+	return 0;
+}
+
+static build_result_t build_project_async(
+	config const &build_config,
+	cppb::vector<source_file> const &source_files,
 	fs::path const &intermediate_bin_directory,
 	fs::file_time_type config_last_update
 )
@@ -339,7 +471,7 @@ static int build_project_async(
 				header_file.generic_string(),
 				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
 			);
-			return 1;
+			return { 1, false, false, {} };
 		}
 		auto const pch_file = [&]() {
 			switch (build_config.compiler)
@@ -386,7 +518,7 @@ static int build_project_async(
 			auto const result = run_command(c_compiler, c_compiler_args, output_kind::stderr_);
 			if (result.exit_code != 0)
 			{
-				return 1;
+				return { result.exit_code, false, false, {} };
 			}
 			if (fs::exists(pch_file))
 			{
@@ -422,7 +554,7 @@ static int build_project_async(
 				header_file.generic_string(),
 				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
 			);
-			return 1;
+			return { 1, false, false, {} };
 		}
 		auto const pch_file = [&]() {
 			switch (build_config.compiler)
@@ -469,7 +601,7 @@ static int build_project_async(
 			auto const result = run_command(cpp_compiler, cpp_compiler_args, output_kind::stderr_);
 			if (result.exit_code != 0)
 			{
-				return 1;
+				return { result.exit_code, false, false, {} };
 			}
 			if (fs::exists(pch_file))
 			{
@@ -493,6 +625,7 @@ static int build_project_async(
 
 	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
 	bool is_any_cpp = false;
+	bool any_run = false;
 	// source file compilation
 	for (std::size_t i = 0; i < compilation_units.size(); ++i)
 	{
@@ -521,6 +654,7 @@ static int build_project_async(
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
 		)
 		{
+			any_run = true;
 			auto const relative_source_file_name = fs::relative(source_file).generic_string();
 
 			if (emit_compile_commands)
@@ -545,7 +679,13 @@ static int build_project_async(
 			{
 				print_command(is_c_source ? c_compiler : cpp_compiler, args);
 			}
-			compilation_futures.push_back({ i, std::async(&run_command, is_c_source ? c_compiler : cpp_compiler, args, output_kind::null_) });
+			compilation_futures.push_back({
+				i,
+				std::async(
+					static_cast<process_result (*)(std::string_view, cppb::vector<std::string> const &, output_kind)>(&run_command),
+					is_c_source ? c_compiler : cpp_compiler, args, output_kind::null_
+				)
+			});
 		}
 		else if (emit_compile_commands)
 		{
@@ -618,7 +758,7 @@ static int build_project_async(
 
 	if (!is_good)
 	{
-		return 1;
+		return { 1, false, false, {} };
 	}
 
 	if (compile_commands.size() != 0)
@@ -627,69 +767,12 @@ static int build_project_async(
 		write_compile_commands_json(compile_commands);
 	}
 
-	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = [&]() -> std::string {
-#ifdef _WIN32
-		if (project_name == "default")
-		{
-			return fmt::format("{}.exe", project_directory_name);
-		}
-		else
-		{
-			return fmt::format("{}-{}.exe", project_name, project_directory_name);
-		}
-#else
-		if (project_name == "default")
-		{
-			return project_directory_name;
-		}
-		else
-		{
-			return fmt::format("{}-{}", project_name, project_directory_name);
-		}
-#endif // windows
-	}();
-
-	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
-	auto const last_object_write_time = object_files
-		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
-		.max(fs::file_time_type::min());
-	if (
-		ctcli::option_value<ctcli::option("build --link")>
-		|| !fs::exists(executable_file)
-		|| fs::last_write_time(executable_file) < last_object_write_time
-	)
-	{
-		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
-		fmt::print("linking {}\n", relative_executable_file_name);
-		cppb::vector<std::string> link_args;
-		link_args.emplace_back("-o");
-		link_args.emplace_back(executable_file.generic_string());
-		for (auto const &object_file : object_files)
-		{
-			link_args.emplace_back(object_file.generic_string());
-		}
-		add_link_flags(link_args, build_config);
-
-		if (ctcli::option_value<ctcli::option("build -v")>)
-		{
-			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
-		}
-		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
-		if (result.exit_code != 0)
-		{
-			return result.exit_code;
-		}
-	}
-
-	return 0;
+	return { 0, any_run, is_any_cpp, std::move(object_files) };
 }
 
-static int build_project_sequential(
-	std::string_view project_name,
+static build_result_t build_project_sequential(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
-	fs::path const &bin_directory,
 	fs::path const &intermediate_bin_directory,
 	fs::file_time_type config_last_update
 )
@@ -767,7 +850,7 @@ static int build_project_sequential(
 				header_file.generic_string(),
 				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
 			);
-			return 1;
+			return { 1, false, false, {} };
 		}
 		auto const pch_file = [&]() {
 			switch (build_config.compiler)
@@ -814,7 +897,7 @@ static int build_project_sequential(
 			auto const result = run_command(c_compiler, c_compiler_args, output_kind::stderr_);
 			if (result.exit_code != 0)
 			{
-				return 1;
+				return { result.exit_code, false, false, {} };
 			}
 			if (fs::exists(pch_file))
 			{
@@ -850,7 +933,7 @@ static int build_project_sequential(
 				header_file.generic_string(),
 				fmt::format("header file '{}' doesn't exist or it was never included", header_file.generic_string())
 			);
-			return 1;
+			return { 1, false, false, {} };
 		}
 		auto const pch_file = [&]() {
 			switch (build_config.compiler)
@@ -897,7 +980,7 @@ static int build_project_sequential(
 			auto const result = run_command(cpp_compiler, cpp_compiler_args, output_kind::stderr_);
 			if (result.exit_code != 0)
 			{
-				return 1;
+				return { result.exit_code, false, false, {} };
 			}
 			if (fs::exists(pch_file))
 			{
@@ -920,6 +1003,7 @@ static int build_project_sequential(
 	}
 
 	bool is_any_cpp = false;
+	bool any_run = false;
 	// source file compilation
 	for (std::size_t i = 0; i < compilation_units.size(); ++i)
 	{
@@ -948,6 +1032,7 @@ static int build_project_sequential(
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
 		)
 		{
+			any_run = true;
 			auto const relative_source_file_name = fs::relative(source_file).generic_string();
 
 			if (emit_compile_commands)
@@ -963,7 +1048,7 @@ static int build_project_sequential(
 			auto const result = run_command(is_c_source ? c_compiler : cpp_compiler, args, output_kind::stderr_);
 			if (result.exit_code != 0)
 			{
-				return 1;
+				return { result.exit_code, false, false, {} };
 			}
 		}
 		else if (emit_compile_commands)
@@ -987,65 +1072,10 @@ static int build_project_sequential(
 		write_compile_commands_json(compile_commands);
 	}
 
-	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = [&]() -> std::string {
-#ifdef _WIN32
-		if (project_name == "default")
-		{
-			return fmt::format("{}.exe", project_directory_name);
-		}
-		else
-		{
-			return fmt::format("{}-{}.exe", project_name, project_directory_name);
-		}
-#else
-		if (project_name == "default")
-		{
-			return project_directory_name;
-		}
-		else
-		{
-			return fmt::format("{}-{}", project_name, project_directory_name);
-		}
-#endif // windows
-	}();
-
-	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
-	auto const last_object_write_time = object_files
-		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
-		.max(fs::file_time_type::min());
-	if (
-		ctcli::option_value<ctcli::option("build --link")>
-		|| !fs::exists(executable_file)
-		|| fs::last_write_time(executable_file) < last_object_write_time
-	)
-	{
-		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
-		fmt::print("linking {}\n", relative_executable_file_name);
-		cppb::vector<std::string> link_args;
-		link_args.emplace_back("-o");
-		link_args.emplace_back(executable_file.generic_string());
-		for (auto const &object_file : object_files)
-		{
-			link_args.emplace_back(object_file.generic_string());
-		}
-		add_link_flags(link_args, build_config);
-
-		if (ctcli::option_value<ctcli::option("build -v")>)
-		{
-			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
-		}
-		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
-		if (result.exit_code != 0)
-		{
-			return result.exit_code;
-		}
-	}
-
-	return 0;
+	return { 0, any_run, is_any_cpp, std::move(object_files) };
 }
 
-static int build_project(project_config const &project_config, fs::file_time_type config_last_update)
+static int build_project(project_config const &project_config, cppb::vector<rule> const &rules, fs::file_time_type config_last_update)
 {
 	std::string error;
 
@@ -1141,29 +1171,68 @@ static int build_project(project_config const &project_config, fs::file_time_typ
 	});
 	write_dependency_json(dependency_file_path, source_files);
 
+	// pre-build rules
+	auto const [prebuild_exit_code, prebuild_any_run] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	if (prebuild_exit_code != 0)
+	{
+		return prebuild_exit_code;
+	}
+
 	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
-	if (!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
-	{
-		return build_project_async(
-			project_config.project_name,
+	auto [exit_code, any_run, any_cpp, object_files] = (!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
+		? build_project_async(
 			build_config,
 			source_files,
-			bin_directory,
+			intermediate_bin_directory,
+			config_last_update
+		)
+		: build_project_sequential(
+			build_config,
+			source_files,
 			intermediate_bin_directory,
 			config_last_update
 		);
-	}
-	else
+	if (exit_code != 0)
 	{
-		return build_project_sequential(
-			project_config.project_name,
-			build_config,
-			source_files,
-			bin_directory,
-			intermediate_bin_directory,
-			config_last_update
-		);
+		return exit_code;
 	}
+
+	// pre-link rules
+	auto const [prelink_exit_code, prelink_any_run] = run_rules("pre-link", build_config.prelink_rules, rules, config_last_update, error);
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	if (prelink_exit_code != 0)
+	{
+		return prelink_exit_code;
+	}
+
+	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, prelink_any_run, any_cpp);
+	if (link_exit_code != 0)
+	{
+		return link_exit_code;
+	}
+
+	// post-build rules
+	auto const [postbuild_exit_code, postbuild_any_run] = run_rules("post-build", build_config.postbuild_rules, rules, config_last_update, error);
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	if (postbuild_exit_code != 0)
+	{
+		return postbuild_exit_code;
+	}
+
+	return 0;
 }
 
 static int run_project(project_config const &project_config)
@@ -1329,7 +1398,7 @@ int main(int argc, char const **argv)
 			}
 			return *it;
 		}();
-		return build_project(project_config, fs::last_write_time(config_file_path));
+		return build_project(project_config, rules, fs::last_write_time(config_file_path));
 	}
 	else if (ctcli::is_command_set<ctcli::command("run")>())
 	{
@@ -1361,7 +1430,7 @@ int main(int argc, char const **argv)
 			}
 			return *it;
 		}();
-		auto const build_result = build_project(project_config, fs::last_write_time(config_file_path));
+		auto const build_result = build_project(project_config, rules, fs::last_write_time(config_file_path));
 		if (build_result != 0)
 		{
 			return build_result;

@@ -15,6 +15,7 @@ enum class output_kind
 	stdout_, stderr_, null_,
 };
 
+process_result run_command(std::string_view command, output_kind output);
 process_result run_command(std::string_view executable, cppb::vector<std::string> const &arguments, output_kind output);
 std::string capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments);
 
