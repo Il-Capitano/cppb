@@ -1008,44 +1008,51 @@ static std::string create_default_config_file_string(std::string_view source_dir
 {
 	std::string result =
 R"({
-	"default": {
-		"compiler": "gcc",
-		"c_standard": "c11",
-		"cpp_standard": "c++20",
+	"projects": {
+		"default": {
+			"compiler": "gcc",
+			"c_standard": "c11",
+			"cpp_standard": "c++20",
 
-		"c_compiler_flags": [],
-		"cpp_compiler_flags": [],
-		"link_flags": [],
-		"emit_compile_commands": true,
+			"c_compiler_flags": [],
+			"cpp_compiler_flags": [],
+			"link_flags": [],
+			"emit_compile_commands": true,
 
-		"run_args": [],
+			"run_args": [],
 
-		"source_directory": ")";
-	result += source_directory;
-	result += R"(",
-		"include_paths": [],
-		"library_paths": [],
-		"libraries": [],
+			"source_directory": ")";
+		result += source_directory;
+		result += R"(",
+			"include_paths": [],
+			"library_paths": [],
+			"libraries": [],
 
-		"defines": [],
-		"warnings": [ "all", "extra" ],
+			"defines": [],
+			"warnings": [ "all", "extra" ],
 
-		"configs": {
-			"windows-debug": {},
-			"windows-release": {},
-			"linux-debug": {},
-			"linux-release": {},
-			"windows": {},
-			"linux": {},
-			"debug": {
-				"optimization": "0"
-			},
-			"release": {
-				"defines": [ "NDEBUG" ],
-				"optimization": "3"
+			"prebuild_rules": [],
+			"prelink_rules": [],
+			"postbuild_rules": [],
+
+			"configs": {
+				"windows-debug": {},
+				"windows-release": {},
+				"linux-debug": {},
+				"linux-release": {},
+				"windows": {},
+				"linux": {},
+				"debug": {
+					"optimization": "0"
+				},
+				"release": {
+					"defines": [ "NDEBUG" ],
+					"optimization": "3"
+				}
 			}
 		}
-	}
+	},
+	"rules": {}
 }
 )";
 	return result;

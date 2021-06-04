@@ -64,8 +64,8 @@ struct config_is_set
 
 	bool include_paths = false;
 
-	bool defines               = false;
-	bool warnings              = false;
+	bool defines  = false;
+	bool warnings = false;
 
 	bool prebuild_rules  = false;
 	bool prelink_rules   = false;
