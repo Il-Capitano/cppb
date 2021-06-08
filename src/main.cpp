@@ -144,7 +144,10 @@ static run_rule_result_t run_rule(
 		result.any_run = true;
 		for (auto const &command : it->commands)
 		{
-			fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
+			fmt::print(
+				point_name.empty() ? "running {}rule '{}': {}\n" : "running {} rule '{}': {}\n",
+				point_name, rule_to_run, command
+			);
 			auto const [_, __, exit_code] = run_command(command, output_kind::stderr_);
 			if (exit_code != 0)
 			{
@@ -1318,7 +1321,101 @@ static int run_project(project_config const &project_config)
 	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_).exit_code;
 }
 
-static int create_new_project(void)
+static int build_command(void)
+{
+	std::string error;
+
+	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const [project_configs, rules] = read_config_json(config_file_path, error);
+	if (!error.empty())
+	{
+		report_error(config_file_path.generic_string(), error);
+		return 1;
+	}
+
+	auto const &project_config = [&project_configs = project_configs]() -> auto & {
+		std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
+		auto const it = std::find_if(
+			project_configs.begin(), project_configs.end(),
+			[config_to_build](auto const &config) {
+				return config_to_build == config.project_name;
+			}
+		);
+		if (it == project_configs.end())
+		{
+			report_error(
+				fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
+				fmt::format("unknown configuration '{}'", config_to_build)
+			);
+			exit(1);
+		}
+		return *it;
+	}();
+	return build_project(project_config, rules, fs::last_write_time(config_file_path));
+}
+
+static int run_command(void)
+{
+	std::string error;
+
+	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const [project_configs, rules] = read_config_json(config_file_path, error);
+	if (!error.empty())
+	{
+		report_error(config_file_path.generic_string(), error);
+		return 1;
+	}
+
+	auto const &project_config = [&project_configs = project_configs]() -> auto & {
+		std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
+		auto const it = std::find_if(
+			project_configs.begin(), project_configs.end(),
+			[config_to_build](auto const &config) {
+				return config_to_build == config.project_name;
+			}
+		);
+		if (it == project_configs.end())
+		{
+			report_error(
+				fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
+				fmt::format("unknown configuration '{}'", config_to_build)
+			);
+			exit(1);
+		}
+		return *it;
+	}();
+	auto const build_result = build_project(project_config, rules, fs::last_write_time(config_file_path));
+	if (build_result != 0)
+	{
+		return build_result;
+	}
+	return run_project(project_config);
+}
+
+static int run_rule_command(void)
+{
+	std::string error;
+
+	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const [project_configs, rules] = read_config_json(config_file_path, error);
+	if (!error.empty())
+	{
+		report_error(config_file_path.generic_string(), error);
+		return 1;
+	}
+
+	auto const rule_to_run = ctcli::command_value<ctcli::command("run-rule")>;
+	auto const [exit_code, _, __] = run_rule("", rule_to_run, rules, fs::file_time_type::min(), error);
+
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	return exit_code;
+}
+
+static int new_command(void)
 {
 	auto const project_directory = fs::path(ctcli::command_value<ctcli::command("new")>);
 	auto const src_directory   = project_directory / ctcli::option_value<ctcli::option("new --src-dir")>;
@@ -1370,76 +1467,19 @@ int main(int argc, char const **argv)
 
 	if (ctcli::is_command_set<ctcli::command("build")>())
 	{
-		std::string error;
-
-		auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
-		auto const [project_configs, rules] = read_config_json(config_file_path, error);
-		if (!error.empty())
-		{
-			report_error(config_file_path.generic_string(), error);
-			return 1;
-		}
-
-		auto const &project_config = [&project_configs = project_configs]() -> auto & {
-			std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
-			auto const it = std::find_if(
-				project_configs.begin(), project_configs.end(),
-				[config_to_build](auto const &config) {
-					return config_to_build == config.project_name;
-				}
-			);
-			if (it == project_configs.end())
-			{
-				report_error(
-					fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
-					fmt::format("unknown configuration '{}'", config_to_build)
-				);
-				exit(1);
-			}
-			return *it;
-		}();
-		return build_project(project_config, rules, fs::last_write_time(config_file_path));
+		return build_command();
 	}
 	else if (ctcli::is_command_set<ctcli::command("run")>())
 	{
-		std::string error;
-
-		auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
-		auto const [project_configs, rules] = read_config_json(config_file_path, error);
-		if (!error.empty())
-		{
-			report_error(config_file_path.generic_string(), error);
-			return 1;
-		}
-
-		auto const &project_config = [&project_configs = project_configs]() -> auto & {
-			std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
-			auto const it = std::find_if(
-				project_configs.begin(), project_configs.end(),
-				[config_to_build](auto const &config) {
-					return config_to_build == config.project_name;
-				}
-			);
-			if (it == project_configs.end())
-			{
-				report_error(
-					fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
-					fmt::format("unknown configuration '{}'", config_to_build)
-				);
-				exit(1);
-			}
-			return *it;
-		}();
-		auto const build_result = build_project(project_config, rules, fs::last_write_time(config_file_path));
-		if (build_result != 0)
-		{
-			return build_result;
-		}
-		return run_project(project_config);
+		return run_command();
+	}
+	else if (ctcli::is_command_set<ctcli::command("run-rule")>())
+	{
+		return run_rule_command();
 	}
 	else if (ctcli::is_command_set<ctcli::command("new")>())
 	{
-		return create_new_project();
+		return new_command();
 	}
 
 	return 0;

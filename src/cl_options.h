@@ -4,9 +4,10 @@
 #include <array>
 #include "ctcli/ctcli.h"
 
-constexpr auto build_options = ctcli::options_id_t::_1;
-constexpr auto run_options   = build_options;
-constexpr auto new_options   = ctcli::options_id_t::_2;
+constexpr auto build_options    = ctcli::options_id_t::_1;
+constexpr auto run_options      = build_options;
+constexpr auto new_options      = ctcli::options_id_t::_2;
+constexpr auto run_rule_options = ctcli::options_id_t::_3;
 
 template<>
 inline constexpr bool ctcli::add_verbose_option<build_options> = true;
@@ -32,11 +33,17 @@ inline constexpr std::array ctcli::command_line_options<new_options> = {
 };
 
 template<>
+inline constexpr std::array ctcli::command_line_options<run_rule_options> = {
+	ctcli::create_option("--config-file <path>", "Set configuration file path (default=.cppb/config.json)", ctcli::arg_type::string),
+};
+
+template<>
 inline constexpr std::array ctcli::command_line_commands<ctcli::commands_id_t::def> = {
 	ctcli::create_command("build", "Build project",         "compiler-flags", build_options),
 	ctcli::create_command("run",   "Build and run project", "compiler-flgas", run_options),
 
-	ctcli::create_command("new <project-name>", "Create a new project in the directory <project-name>", "",               new_options, ctcli::arg_type::string),
+	ctcli::create_command("run-rule <rule>",    "Run <rule>",                                           "", new_options, ctcli::arg_type::string),
+	ctcli::create_command("new <project-name>", "Create a new project in the directory <project-name>", "", new_options, ctcli::arg_type::string),
 };
 
 enum class build_mode
