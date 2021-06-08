@@ -106,18 +106,22 @@ static run_rule_result_t run_rule(
 	auto const it = std::find_if(rules.begin(), rules.end(), [rule_to_run](auto const &rule) {
 		return rule_to_run == rule.rule_name;
 	});
+	auto const rule_path = fs::path(rule_to_run);
+	auto const last_rule_write_time = fs::last_write_time(rule_path);
 	if (it == rules.end())
 	{
-		auto const rule_path = fs::path(rule_to_run);
 		if (!fs::exists(rule_path))
 		{
 			error = fmt::format("'{}' is not a rule name or a file", rule_to_run);
 			return {};
 		}
-		return { 0, false, fs::last_write_time(rule_path) };
+		return { 0, false, last_rule_write_time };
 	}
 
-	run_rule_result_t result = { 0, false, fs::file_time_type::min() };
+	run_rule_result_t result = {
+		0, false,
+		it->is_file ? last_rule_write_time : fs::file_time_type::min()
+	};
 	for (auto const &dependency : it->dependencies)
 	{
 		auto const [exit_code, any_run, last_update_time] = run_rule("", dependency, rules, config_last_update, error);
@@ -134,11 +138,10 @@ static run_rule_result_t run_rule(
 		}
 	}
 
-	auto const rule_path = fs::path(rule_to_run);
 	if (
 		!it->is_file
 		|| !fs::exists(rule_path)
-		|| fs::last_write_time(rule_path) < std::max(config_last_update, result.last_update_time)
+		|| last_rule_write_time < std::max(config_last_update, result.last_update_time)
 	)
 	{
 		result.any_run = true;
@@ -1396,7 +1399,7 @@ static int run_rule_command(void)
 {
 	std::string error;
 
-	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("run-rule --config-file")>);
 	auto const [project_configs, rules] = read_config_json(config_file_path, error);
 	if (!error.empty())
 	{
@@ -1405,7 +1408,8 @@ static int run_rule_command(void)
 	}
 
 	auto const rule_to_run = ctcli::command_value<ctcli::command("run-rule")>;
-	auto const [exit_code, _, __] = run_rule("", rule_to_run, rules, fs::file_time_type::min(), error);
+	auto const last_modified_time = ctcli::option_value<ctcli::option("run-rule --force")> ? fs::file_time_type::max() : fs::file_time_type::min();
+	auto const [exit_code, _, __] = run_rule("", rule_to_run, rules, last_modified_time, error);
 
 	if (!error.empty())
 	{
