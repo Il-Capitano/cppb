@@ -107,7 +107,6 @@ static run_rule_result_t run_rule(
 		return rule_to_run == rule.rule_name;
 	});
 	auto const rule_path = fs::path(rule_to_run);
-	auto const last_rule_write_time = fs::last_write_time(rule_path);
 	if (it == rules.end())
 	{
 		if (!fs::exists(rule_path))
@@ -115,9 +114,10 @@ static run_rule_result_t run_rule(
 			error = fmt::format("'{}' is not a rule name or a file", rule_to_run);
 			return {};
 		}
-		return { 0, false, last_rule_write_time };
+		return { 0, false, fs::last_write_time(rule_path) };
 	}
 
+	auto const last_rule_write_time = fs::exists(rule_path) ? fs::last_write_time(rule_path) : fs::file_time_type::min();
 	run_rule_result_t result = {
 		0, false,
 		it->is_file ? last_rule_write_time : fs::file_time_type::min()
@@ -166,7 +166,7 @@ static run_rule_result_t run_rule(
 	return result;
 }
 
-static std::pair<int, bool> run_rules(
+static run_rule_result_t run_rules(
 	std::string_view point_name,  // pre-build, pre-link, post-build
 	cppb::vector<std::string> const &rules_to_run,
 	cppb::vector<rule> const &rules,
@@ -175,16 +175,18 @@ static std::pair<int, bool> run_rules(
 )
 {
 	bool any_rules_run = false;
+	fs::file_time_type last_update_time = config_last_update;
 	for (auto const &rule_to_run : rules_to_run)
 	{
-		auto const [exit_code, any_run, _] = run_rule(point_name, rule_to_run, rules, config_last_update, error);
+		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run, rules, config_last_update, error);
 		any_rules_run |= any_run;
+		last_update_time = std::max(last_update_time, last_update);
 		if (exit_code != 0 || !error.empty())
 		{
-			return { exit_code, any_rules_run };
+			return { exit_code, any_rules_run, last_update_time };
 		}
 	}
-	return { 0, any_rules_run };
+	return { 0, any_rules_run, last_update_time };
 }
 
 static void print_command(std::string_view executable, cppb::vector<std::string> const &arguments)
@@ -311,7 +313,7 @@ static int link_project(
 	config const &build_config,
 	fs::path const &bin_directory,
 	cppb::vector<fs::path> const &object_files,
-	bool prelink_any_run,
+	fs::file_time_type dependency_last_write_time,
 	bool is_any_cpp
 )
 {
@@ -344,10 +346,10 @@ static int link_project(
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 	auto const last_object_write_time = object_files
 		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
-		.max(fs::file_time_type::min());
+		.max(dependency_last_write_time);
+
 	if (
 		ctcli::option_value<ctcli::option("build --link")>
-		|| prelink_any_run
 		|| !fs::exists(executable_file)
 		|| fs::last_write_time(executable_file) < last_object_write_time
 	)
@@ -1178,7 +1180,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	write_dependency_json(dependency_file_path, source_files);
 
 	// pre-build rules
-	auto const [prebuild_exit_code, prebuild_any_run] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
+	auto const [prebuild_exit_code, prebuild_any_run, _] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
@@ -1190,26 +1192,27 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	}
 
 	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
-	auto [exit_code, any_run, any_cpp, object_files] = (!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
-		? build_project_async(
-			build_config,
-			source_files,
-			intermediate_bin_directory,
-			config_last_update
-		)
-		: build_project_sequential(
-			build_config,
-			source_files,
-			intermediate_bin_directory,
-			config_last_update
-		);
+	auto [exit_code, any_run, any_cpp, object_files] =
+		(!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
+			? build_project_async(
+				build_config,
+				source_files,
+				intermediate_bin_directory,
+				config_last_update
+			)
+			: build_project_sequential(
+				build_config,
+				source_files,
+				intermediate_bin_directory,
+				config_last_update
+			);
 	if (exit_code != 0)
 	{
 		return exit_code;
 	}
 
 	// pre-link rules
-	auto const [prelink_exit_code, prelink_any_run] = run_rules("pre-link", build_config.prelink_rules, rules, config_last_update, error);
+	auto const [prelink_exit_code, prelink_any_run, prelink_last_update] = run_rules("pre-link", build_config.prelink_rules, rules, config_last_update, error);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
@@ -1220,14 +1223,14 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return prelink_exit_code;
 	}
 
-	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, prelink_any_run, any_cpp);
+	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, prelink_last_update, any_cpp);
 	if (link_exit_code != 0)
 	{
 		return link_exit_code;
 	}
 
 	// post-build rules
-	auto const [postbuild_exit_code, postbuild_any_run] = run_rules("post-build", build_config.postbuild_rules, rules, config_last_update, error);
+	auto const [postbuild_exit_code, postbuild_any_run, postbuild_last_update] = run_rules("post-build", build_config.postbuild_rules, rules, config_last_update, error);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
