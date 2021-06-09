@@ -313,7 +313,7 @@ static int link_project(
 	config const &build_config,
 	fs::path const &bin_directory,
 	cppb::vector<fs::path> const &object_files,
-	fs::file_time_type dependency_last_write_time,
+	fs::file_time_type dependency_last_update,
 	bool is_any_cpp
 )
 {
@@ -346,7 +346,7 @@ static int link_project(
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 	auto const last_object_write_time = object_files
 		.transform([](auto const &object_file) { return fs::last_write_time(object_file); })
-		.max(dependency_last_write_time);
+		.max(dependency_last_update);
 
 	if (
 		ctcli::option_value<ctcli::option("build --link")>
@@ -383,7 +383,7 @@ static build_result_t build_project_async(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
 	fs::path const &intermediate_bin_directory,
-	fs::file_time_type config_last_update
+	fs::file_time_type dependency_last_update
 )
 {
 	auto const emit_compile_commands = (
@@ -504,7 +504,7 @@ static build_result_t build_project_async(
 		if (
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| pch_last_write_time < header_it->last_modified_time
-			|| pch_last_write_time < config_last_update
+			|| pch_last_write_time < dependency_last_update
 		)
 		{
 			auto const header_file_name = header_file.generic_string();
@@ -587,7 +587,7 @@ static build_result_t build_project_async(
 		if (
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| pch_last_write_time < header_it->last_modified_time
-			|| pch_last_write_time < config_last_update
+			|| pch_last_write_time < dependency_last_update
 		)
 		{
 			auto const header_file_name = header_file.generic_string();
@@ -658,7 +658,7 @@ static build_result_t build_project_async(
 			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| object_last_write_time < source.last_modified_time
-			|| object_last_write_time < config_last_update
+			|| object_last_write_time < dependency_last_update
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
 		)
 		{
@@ -782,7 +782,7 @@ static build_result_t build_project_sequential(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
 	fs::path const &intermediate_bin_directory,
-	fs::file_time_type config_last_update
+	fs::file_time_type dependency_last_update
 )
 {
 	auto const emit_compile_commands = (
@@ -883,7 +883,7 @@ static build_result_t build_project_sequential(
 		if (
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| pch_last_write_time < header_it->last_modified_time
-			|| pch_last_write_time < config_last_update
+			|| pch_last_write_time < dependency_last_update
 		)
 		{
 			auto const header_file_name = header_file.generic_string();
@@ -966,7 +966,7 @@ static build_result_t build_project_sequential(
 		if (
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| pch_last_write_time < header_it->last_modified_time
-			|| pch_last_write_time < config_last_update
+			|| pch_last_write_time < dependency_last_update
 		)
 		{
 			auto const header_file_name = header_file.generic_string();
@@ -1036,7 +1036,7 @@ static build_result_t build_project_sequential(
 			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
 			ctcli::option_value<ctcli::option("build --rebuild")>
 			|| object_last_write_time < source.last_modified_time
-			|| object_last_write_time < config_last_update
+			|| object_last_write_time < dependency_last_update
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
 		)
 		{
@@ -1180,7 +1180,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	write_dependency_json(dependency_file_path, source_files);
 
 	// pre-build rules
-	auto const [prebuild_exit_code, prebuild_any_run, _] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
+	auto const [prebuild_exit_code, prebuild_any_run, prebuild_last_update] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
@@ -1191,6 +1191,8 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return prebuild_exit_code;
 	}
 
+	auto const build_dependency_last_update = std::max(config_last_update, prebuild_last_update);
+
 	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
 	auto [exit_code, any_run, any_cpp, object_files] =
 		(!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
@@ -1198,13 +1200,13 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 				build_config,
 				source_files,
 				intermediate_bin_directory,
-				config_last_update
+				build_dependency_last_update
 			)
 			: build_project_sequential(
 				build_config,
 				source_files,
 				intermediate_bin_directory,
-				config_last_update
+				build_dependency_last_update
 			);
 	if (exit_code != 0)
 	{
@@ -1223,7 +1225,9 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return prelink_exit_code;
 	}
 
-	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, prelink_last_update, any_cpp);
+	auto const link_dependency_last_update = std::max(config_last_update, prelink_last_update);
+
+	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, link_dependency_last_update, any_cpp);
 	if (link_exit_code != 0)
 	{
 		return link_exit_code;
