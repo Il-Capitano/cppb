@@ -39,8 +39,7 @@
 				},
 				"linux-release": {},
 				"windows": {
-					"cpp_compiler_flags": [ "-stdlib=libc++" ],
-					"link_flags": [ "-stdlib=libc++" ]
+					"cpp_compiler_flags": [ "-femulated-tls" ]
 				},
 				"linux": {
 					"compiler": "clang-12",
