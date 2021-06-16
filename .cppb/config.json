@@ -43,7 +43,7 @@
 					"link_flags": [ "-stdlib=libc++" ]
 				},
 				"linux": {
-					"compiler": "clang-11",
+					"compiler": "clang-12",
 					"emit_compile_commands": false,
 					"link_flags": [ "-lpthread" ]
 				},
