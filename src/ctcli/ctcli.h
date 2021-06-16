@@ -40,6 +40,10 @@ struct string_view : std::string_view
 {
 	using std::string_view::string_view;
 
+	constexpr string_view(char const *str)
+		: std::string_view(str)
+	{}
+
 	constexpr string_view(std::string_view str)
 		: std::string_view(str)
 	{}
@@ -2059,6 +2063,58 @@ static constexpr auto *command_value_storage_ptr = &std::get<get_integer_command
 
 } // namespace internal
 
+#if __cplusplus >= 202002L
+
+namespace internal
+{
+
+struct group_element_index_t_
+{
+	constexpr group_element_index_t_(group_element_index_t _index)
+		: index(_index)
+	{}
+
+	// template is needed to not instantiate option
+	template<auto ID = &internal::default_parse_tag>
+	constexpr group_element_index_t_(string_view flag_name)
+		: index(group_element<ID>(flag_name))
+	{}
+
+	// template is needed to not instantiate option
+	template<auto ID = &internal::default_parse_tag>
+	constexpr group_element_index_t_(char const *flag_name)
+		: index(group_element<ID>(flag_name))
+	{}
+
+	group_element_index_t index;
+};
+
+} // namespace internal
+
+/// Accessor for the specified option's value.
+template<internal::group_element_index_t_ Index>
+static auto &group_element_value = internal::group_element_value_storage_ptr<Index.index>->element_value;
+
+/// Accessor for the specified option's index.
+template<internal::group_element_index_t_ Index>
+static auto &group_element_index = internal::group_element_value_storage_ptr<Index.index>->flag_position;
+
+/// Accessor for the specified option's flag's value.
+template<internal::group_element_index_t_ Index>
+static auto &group_element_flag_value = internal::group_element_value_storage_ptr<Index.index>->flag_value;
+
+/// Accessor for the specified option's argument (if there's any).
+template<internal::group_element_index_t_ Index>
+static auto &group_element_arg_value = internal::group_element_value_storage_ptr<Index.index>->arg_value;
+
+/// Returns whether the specified option has been set or not
+template<internal::group_element_index_t_ Index>
+inline bool is_option_set(void) noexcept
+{
+	return group_element_index<Index> != 0;
+}
+
+#else
 
 /// Accessor for the specified option's value.
 template<internal::group_element_index_t Index>
@@ -2083,6 +2139,61 @@ inline bool is_option_set(void) noexcept
 	return group_element_index<Index> != 0;
 }
 
+#endif // c++20
+
+
+#if __cplusplus >= 202002L
+
+namespace internal
+{
+
+struct option_index_t_
+{
+	constexpr option_index_t_(option_index_t _index)
+		: index(_index)
+	{}
+
+	// template is needed to not instantiate option
+	template<auto ID = &internal::default_parse_tag>
+	constexpr option_index_t_(string_view flag_name)
+		: index(option<ID>(flag_name))
+	{}
+
+	// template is needed to not instantiate option
+	template<auto ID = &internal::default_parse_tag>
+	constexpr option_index_t_(char const *flag_name)
+		: index(option<ID>(flag_name))
+	{}
+
+	option_index_t index;
+};
+
+} // namespace internal
+
+/// Accessor for the specified option's value.
+template<internal::option_index_t_ Index>
+static auto &option_value = internal::option_value_storage_ptr<Index.index>->option_value;
+
+/// Accessor for the specified option's index.
+template<internal::option_index_t_ Index>
+static auto &option_index = internal::option_value_storage_ptr<Index.index>->flag_position;
+
+/// Accessor for the specified option's flag's value.
+template<internal::option_index_t_ Index>
+static auto &option_flag_value = internal::option_value_storage_ptr<Index.index>->flag_value;
+
+/// Accessor for the specified option's argument (if there's any).
+template<internal::option_index_t_ Index>
+static auto &option_arg_value = internal::option_value_storage_ptr<Index.index>->arg_value;
+
+/// Returns whether the specified option has been set or not
+template<internal::option_index_t_ Index>
+inline bool is_option_set(void) noexcept
+{
+	return option_index<Index> != 0;
+}
+
+#else
 
 /// Accessor for the specified option's value.
 template<internal::option_index_t Index>
@@ -2107,23 +2218,61 @@ inline bool is_option_set(void) noexcept
 	return option_index<Index> != 0;
 }
 
-/// Accessor for the positional arguments for the given options
-template<auto ID>
-static auto &positional_arguments = []() -> auto & {
-	if constexpr (std::is_same_v<decltype(ID), options_id_t>)
-	{
-		return internal::positional_arguments_storage<ID>;
-	}
-	else if constexpr (std::is_same_v<decltype(ID), internal::command_index_t>)
-	{
-		return internal::positional_arguments_storage<internal::get_command<ID>().options_id>;
-	}
-	else
-	{
-		static_assert(std::is_same_v<decltype(ID), options_id_t> || std::is_same_v<decltype(ID), internal::command_index_t>, "invalid template argument to ctcli::positional_arguments");
-	}
-}();
+#endif // c++20
 
+
+#if __cplusplus >= 202002L
+
+namespace internal
+{
+
+struct command_index_t_
+{
+	constexpr command_index_t_(command_index_t _index)
+		: index(_index)
+	{}
+
+	// template is needed to not instantiate option
+	template<commands_id_t ID = commands_id_t::def>
+	constexpr command_index_t_(string_view flag_name)
+		: index(command<ID>(flag_name))
+	{}
+
+	// template is needed to not instantiate option
+	template<commands_id_t ID = commands_id_t::def>
+	constexpr command_index_t_(char const *flag_name)
+		: index(command<ID>(flag_name))
+	{}
+
+	command_index_t index;
+};
+
+} // namespace internal
+
+/// Accessor for the specified command's value.
+template<internal::command_index_t_ Index>
+static auto &command_value = internal::command_value_storage_ptr<Index.index>->option_value;
+
+/// Accessor for the specified command's index.
+template<internal::command_index_t_ Index>
+static auto &command_index = internal::command_value_storage_ptr<Index.index>->flag_position;
+
+/// Accessor for the specified command's flag's value.
+template<internal::command_index_t_ Index>
+static auto &command_flag_value = internal::command_value_storage_ptr<Index.index>->flag_value;
+
+/// Accessor for the specified command's argument (if there's any).
+template<internal::command_index_t_ Index>
+static auto &command_arg_value = internal::command_value_storage_ptr<Index.index>->arg_value;
+
+/// Returns whether the specified command has been set or not
+template<internal::command_index_t_ Index>
+inline bool is_command_set(void) noexcept
+{
+	return command_index<Index> != 0;
+}
+
+#else
 
 /// Accessor for the specified command's value.
 template<internal::command_index_t Index>
@@ -2147,6 +2296,25 @@ inline bool is_command_set(void) noexcept
 {
 	return command_index<Index> != 0;
 }
+
+#endif // c++20
+
+/// Accessor for the positional arguments for the given options
+template<auto ID>
+static auto &positional_arguments = []() -> auto & {
+	if constexpr (std::is_same_v<decltype(ID), options_id_t>)
+	{
+		return internal::positional_arguments_storage<ID>;
+	}
+	else if constexpr (std::is_same_v<decltype(ID), internal::command_index_t>)
+	{
+		return internal::positional_arguments_storage<internal::get_command<ID>().options_id>;
+	}
+	else
+	{
+		static_assert(std::is_same_v<decltype(ID), options_id_t> || std::is_same_v<decltype(ID), internal::command_index_t>, "invalid template argument to ctcli::positional_arguments");
+	}
+}();
 
 
 namespace internal

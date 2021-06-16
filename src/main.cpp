@@ -205,7 +205,7 @@ static cppb::vector<std::string> get_common_c_compiler_flags(config const &build
 	cppb::vector<std::string> result;
 
 	result.emplace_back("-c");
-	if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 	{
 		result.emplace_back("-g");
 	}
@@ -223,7 +223,7 @@ static cppb::vector<std::string> get_common_cpp_compiler_flags(config const &bui
 	cppb::vector<std::string> result;
 
 	result.emplace_back("-c");
-	if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 	{
 		result.emplace_back("-g");
 	}
@@ -349,7 +349,7 @@ static int link_project(
 		.max(dependency_last_update);
 
 	if (
-		ctcli::option_value<ctcli::option("build --link")>
+		ctcli::option_value<"build --link">
 		|| !fs::exists(executable_file)
 		|| fs::last_write_time(executable_file) < last_object_write_time
 	)
@@ -365,7 +365,7 @@ static int link_project(
 		}
 		add_link_flags(link_args, build_config);
 
-		if (ctcli::option_value<ctcli::option("build -v")>)
+		if (ctcli::option_value<"build -v">)
 		{
 			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
 		}
@@ -387,8 +387,8 @@ static build_result_t build_project_async(
 )
 {
 	auto const emit_compile_commands = (
-			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
-			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
+			ctcli::option_value<"build --build-mode"> == build_mode::debug
+			&& (ctcli::option_value<"build --emit-compile-commands"> || build_config.emit_compile_commands)
 		) && [&]() {
 			fs::path const compile_commands_json = "./compile_commands.json";
 			return !fs::exists(compile_commands_json)
@@ -502,7 +502,7 @@ static build_result_t build_project_async(
 		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
 		c_pch_last_update = pch_last_write_time;
 		if (
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| pch_last_write_time < header_it->last_modified_time
 			|| pch_last_write_time < dependency_last_update
 		)
@@ -519,7 +519,7 @@ static build_result_t build_project_async(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(c_compiler, c_compiler_args);
 			}
@@ -585,7 +585,7 @@ static build_result_t build_project_async(
 		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
 		cpp_pch_last_update = pch_last_write_time;
 		if (
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| pch_last_write_time < header_it->last_modified_time
 			|| pch_last_write_time < dependency_last_update
 		)
@@ -602,7 +602,7 @@ static build_result_t build_project_async(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(cpp_compiler, cpp_compiler_args);
 			}
@@ -631,7 +631,7 @@ static build_result_t build_project_async(
 		}
 	}
 
-	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
+	auto const job_count = ctcli::option_value<"build --jobs">;
 	bool is_any_cpp = false;
 	bool any_run = false;
 	// source file compilation
@@ -656,7 +656,7 @@ static build_result_t build_project_async(
 
 		if (
 			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| object_last_write_time < source.last_modified_time
 			|| object_last_write_time < dependency_last_update
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
@@ -683,7 +683,7 @@ static build_result_t build_project_async(
 				compilation_futures.erase(finished);
 			}
 			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(is_c_source ? c_compiler : cpp_compiler, args);
 			}
@@ -786,8 +786,8 @@ static build_result_t build_project_sequential(
 )
 {
 	auto const emit_compile_commands = (
-			ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug
-			&& (ctcli::option_value<ctcli::option("build --emit-compile-commands")> || build_config.emit_compile_commands)
+			ctcli::option_value<"build --build-mode"> == build_mode::debug
+			&& (ctcli::option_value<"build --emit-compile-commands"> || build_config.emit_compile_commands)
 		) && [&]() {
 			fs::path const compile_commands_json = "./compile_commands.json";
 			return !fs::exists(compile_commands_json)
@@ -881,7 +881,7 @@ static build_result_t build_project_sequential(
 		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
 		c_pch_last_update = pch_last_write_time;
 		if (
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| pch_last_write_time < header_it->last_modified_time
 			|| pch_last_write_time < dependency_last_update
 		)
@@ -898,7 +898,7 @@ static build_result_t build_project_sequential(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(c_compiler, c_compiler_args);
 			}
@@ -964,7 +964,7 @@ static build_result_t build_project_sequential(
 		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
 		cpp_pch_last_update = pch_last_write_time;
 		if (
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| pch_last_write_time < header_it->last_modified_time
 			|| pch_last_write_time < dependency_last_update
 		)
@@ -981,7 +981,7 @@ static build_result_t build_project_sequential(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(cpp_compiler, cpp_compiler_args);
 			}
@@ -1034,7 +1034,7 @@ static build_result_t build_project_sequential(
 
 		if (
 			auto const object_last_write_time = fs::exists(object_file) ? fs::last_write_time(object_file) : fs::file_time_type::min();
-			ctcli::option_value<ctcli::option("build --rebuild")>
+			ctcli::option_value<"build --rebuild">
 			|| object_last_write_time < source.last_modified_time
 			|| object_last_write_time < dependency_last_update
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
@@ -1049,7 +1049,7 @@ static build_result_t build_project_sequential(
 			}
 
 			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-			if (ctcli::option_value<ctcli::option("build --verbose")>)
+			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(is_c_source ? c_compiler : cpp_compiler, args);
 			}
@@ -1089,7 +1089,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 
 	auto const &build_config = [&]() -> auto & {
 #ifdef _WIN32
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return project_config.windows_debug;
 		}
@@ -1098,7 +1098,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 			return project_config.windows_release;
 		}
 #else
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return project_config.linux_debug;
 		}
@@ -1111,32 +1111,32 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 
 	auto const bin_directory = [&]() {
 #ifdef _WIN32
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "windows-debug";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-debug";
 		}
 		else
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "windows-release";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-release";
 		}
 #else
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "linux-debug";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-debug";
 		}
 		else
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "linux-release";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-release";
 		}
 #endif // windows
 	}();
 	auto const intermediate_bin_directory = bin_directory / fmt::format("int-{}", project_config.project_name);
 	fs::create_directories(intermediate_bin_directory);
 
-	auto const cppb_dir = fs::path(ctcli::option_value<ctcli::option("build --cppb-dir")>);
+	auto const cppb_dir = fs::path(ctcli::option_value<"build --cppb-dir">);
 	auto const dependency_file_path = [&]() {
 #ifdef _WIN32
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return cppb_dir / "dependencies/windows-debug.json";
 		}
@@ -1145,7 +1145,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 			return cppb_dir / "dependencies/windows-release.json";
 		}
 #else
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return cppb_dir / "dependencies/linux-debug.json";
 		}
@@ -1193,9 +1193,9 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 
 	auto const build_dependency_last_update = std::max(config_last_update, prebuild_last_update);
 
-	auto const job_count = ctcli::option_value<ctcli::option("build --jobs")>;
+	auto const job_count = ctcli::option_value<"build --jobs">;
 	auto [exit_code, any_run, any_cpp, object_files] =
-		(!ctcli::option_value<ctcli::option("build -s")> && job_count > 1)
+		(!ctcli::option_value<"build -s"> && job_count > 1)
 			? build_project_async(
 				build_config,
 				source_files,
@@ -1254,7 +1254,7 @@ static int run_project(project_config const &project_config)
 
 	auto const &build_config = [&]() -> auto & {
 #ifdef _WIN32
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return project_config.windows_debug;
 		}
@@ -1263,7 +1263,7 @@ static int run_project(project_config const &project_config)
 			return project_config.windows_release;
 		}
 #else
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
 			return project_config.linux_debug;
 		}
@@ -1276,22 +1276,22 @@ static int run_project(project_config const &project_config)
 
 	auto const bin_directory = [&]() {
 #ifdef _WIN32
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "windows-debug";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-debug";
 		}
 		else
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "windows-release";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-release";
 		}
 #else
-		if (ctcli::option_value<ctcli::option("build --build-mode")> == build_mode::debug)
+		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "linux-debug";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-debug";
 		}
 		else
 		{
-			return fs::path(ctcli::option_value<ctcli::option("build --bin-dir")>) / "linux-release";
+			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-release";
 		}
 #endif // windows
 	}();
@@ -1335,7 +1335,7 @@ static int build_command(void)
 {
 	std::string error;
 
-	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const config_file_path = fs::path(ctcli::option_value<"build --config-file">);
 	auto const [project_configs, rules] = read_config_json(config_file_path, error);
 	if (!error.empty())
 	{
@@ -1344,7 +1344,7 @@ static int build_command(void)
 	}
 
 	auto const &project_config = [&project_configs = project_configs]() -> auto & {
-		std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
+		std::string_view const config_to_build = ctcli::option_value<"build --build-config">;
 		auto const it = std::find_if(
 			project_configs.begin(), project_configs.end(),
 			[config_to_build](auto const &config) {
@@ -1354,7 +1354,7 @@ static int build_command(void)
 		if (it == project_configs.end())
 		{
 			report_error(
-				fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
+				fmt::format("<command-line>:{}", ctcli::option_index<"build --build-config">),
 				fmt::format("unknown configuration '{}'", config_to_build)
 			);
 			exit(1);
@@ -1368,7 +1368,7 @@ static int run_command(void)
 {
 	std::string error;
 
-	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("build --config-file")>);
+	auto const config_file_path = fs::path(ctcli::option_value<"build --config-file">);
 	auto const [project_configs, rules] = read_config_json(config_file_path, error);
 	if (!error.empty())
 	{
@@ -1377,7 +1377,7 @@ static int run_command(void)
 	}
 
 	auto const &project_config = [&project_configs = project_configs]() -> auto & {
-		std::string_view const config_to_build = ctcli::option_value<ctcli::option("build --build-config")>;
+		std::string_view const config_to_build = ctcli::option_value<"build --build-config">;
 		auto const it = std::find_if(
 			project_configs.begin(), project_configs.end(),
 			[config_to_build](auto const &config) {
@@ -1387,7 +1387,7 @@ static int run_command(void)
 		if (it == project_configs.end())
 		{
 			report_error(
-				fmt::format("<command-line>:{}", ctcli::option_index<ctcli::option("build --build-config")>),
+				fmt::format("<command-line>:{}", ctcli::option_index<"build --build-config">),
 				fmt::format("unknown configuration '{}'", config_to_build)
 			);
 			exit(1);
@@ -1406,7 +1406,7 @@ static int run_rule_command(void)
 {
 	std::string error;
 
-	auto const config_file_path = fs::path(ctcli::option_value<ctcli::option("run-rule --config-file")>);
+	auto const config_file_path = fs::path(ctcli::option_value<"run-rule --config-file">);
 	auto const [project_configs, rules] = read_config_json(config_file_path, error);
 	if (!error.empty())
 	{
@@ -1414,8 +1414,8 @@ static int run_rule_command(void)
 		return 1;
 	}
 
-	auto const rule_to_run = ctcli::command_value<ctcli::command("run-rule")>;
-	auto const last_modified_time = ctcli::option_value<ctcli::option("run-rule --force")> ? fs::file_time_type::max() : fs::file_time_type::min();
+	auto const rule_to_run = ctcli::command_value<"run-rule">;
+	auto const last_modified_time = ctcli::option_value<"run-rule --force"> ? fs::file_time_type::max() : fs::file_time_type::min();
 	auto const [exit_code, _, __] = run_rule("", rule_to_run, rules, last_modified_time, error);
 
 	if (!error.empty())
@@ -1428,14 +1428,14 @@ static int run_rule_command(void)
 
 static int new_command(void)
 {
-	auto const project_directory = fs::path(ctcli::command_value<ctcli::command("new")>);
-	auto const src_directory   = project_directory / ctcli::option_value<ctcli::option("new --src-dir")>;
-	auto const config_file     = project_directory / ctcli::option_value<ctcli::option("new --config-file")>;
+	auto const project_directory = fs::path(ctcli::command_value<"new">);
+	auto const src_directory   = project_directory / ctcli::option_value<"new --src-dir">;
+	auto const config_file     = project_directory / ctcli::option_value<"new --config-file">;
 
 	fs::create_directories(src_directory);
 	fs::create_directories(config_file.parent_path());
 
-	output_default_config_json(config_file, ctcli::option_value<ctcli::option("new --src-dir")>);
+	output_default_config_json(config_file, ctcli::option_value<"new --src-dir">);
 
 	auto const default_main_path = src_directory / "main.cpp";
 	if (!fs::exists(default_main_path))
@@ -1476,19 +1476,19 @@ int main(int argc, char const **argv)
 		return 0;
 	}
 
-	if (ctcli::is_command_set<ctcli::command("build")>())
+	if (ctcli::is_command_set<"build">())
 	{
 		return build_command();
 	}
-	else if (ctcli::is_command_set<ctcli::command("run")>())
+	else if (ctcli::is_command_set<"run">())
 	{
 		return run_command();
 	}
-	else if (ctcli::is_command_set<ctcli::command("run-rule")>())
+	else if (ctcli::is_command_set<"run-rule">())
 	{
 		return run_rule_command();
 	}
-	else if (ctcli::is_command_set<ctcli::command("new")>())
+	else if (ctcli::is_command_set<"new">())
 	{
 		return new_command();
 	}
