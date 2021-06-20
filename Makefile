@@ -12,6 +12,7 @@ HEADERS := src/ctcli/ctcli.h src/ranges/ranges.h src/analyze.h src/cl_options.h 
 ifeq ($(OS),Windows_NT)
 	EXE += bin/cppb.exe
 	LD_FLAGS += -fuse-ld=lld
+	CXX_FLAGS += -femulated-tls
 else
 	EXE += bin/cppb
 	CXX = clang++-11
