@@ -18,11 +18,11 @@ static cppb::vector<std::string> get_library_cflags(std::string_view library)
 			auto const llvm_config = library.size() == 4
 				? std::string("llvm-config")
 				: "llvm-config" + std::string(library.substr(4));
-			return capture_command_output(llvm_config, {{ "--cflags" }});
+			return capture_command_output(llvm_config, {{ "--cflags" }}).first;
 		}
 		else
 		{
-			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }});
+			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }}).first;
 		}
 	}();
 	std::string_view remaining = cflags;
@@ -52,11 +52,11 @@ static cppb::vector<std::string> get_library_cxxflags(std::string_view library)
 			auto const llvm_config = library.size() == 4
 				? std::string("llvm-config")
 				: "llvm-config" + std::string(library.substr(4));
-			return capture_command_output(llvm_config, {{ "--cxxflags" }});
+			return capture_command_output(llvm_config, {{ "--cxxflags" }}).first;
 		}
 		else
 		{
-			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }});
+			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }}).first;
 		}
 	}();
 	std::string_view remaining = cxxflags;
@@ -86,11 +86,19 @@ static cppb::vector<std::string> get_library_libs(std::string_view library)
 			auto const llvm_config = library.size() == 4
 				? std::string("llvm-config")
 				: "llvm-config" + std::string(library.substr(4));
-			return capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }});
+			return capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }}).first;
 		}
 		else
 		{
-			return capture_command_output("pkg-config", {{ "--libs", std::string(library) }});
+			auto [result, is_valid] = capture_command_output("pkg-config", {{ "--libs", std::string(library) }});
+			if (is_valid)
+			{
+				return result;
+			}
+			else
+			{
+				return fmt::format("-l{}", library);
+			}
 		}
 	}();
 	std::string_view remaining = libs;

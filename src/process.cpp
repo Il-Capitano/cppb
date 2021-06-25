@@ -146,7 +146,7 @@ process_result run_command(std::string_view executable, cppb::vector<std::string
 	return run_command(command, output);
 }
 
-std::string capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments)
+std::pair<std::string, bool> capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments)
 {
 	std::string command{ executable };
 	for (auto const &arg : arguments)
@@ -186,5 +186,5 @@ std::string capture_command_output(std::string_view executable, cppb::vector<std
 	{
 		result.clear();
 	}
-	return result;
+	return { std::move(result), exit_code == 0 };
 }
