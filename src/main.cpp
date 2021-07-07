@@ -148,10 +148,14 @@ static run_rule_result_t run_rule(
 		result.any_run = true;
 		for (auto const &command : it->commands)
 		{
-			fmt::print(
-				point_name.empty() ? "running {}rule '{}': {}\n" : "running {} rule '{}': {}\n",
-				point_name, rule_to_run, command
-			);
+			if (point_name.empty())
+			{
+				fmt::print("running rule '{}': {}\n", rule_to_run, command);
+			}
+			else
+			{
+				fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
+			}
 			std::cout << std::flush;
 			auto const [_, __, exit_code] = run_command(command, output_kind::stderr_);
 			if (exit_code != 0)

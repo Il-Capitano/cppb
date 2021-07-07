@@ -14,6 +14,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <fmt/format.h>
 
@@ -200,7 +201,7 @@ constexpr void consume_flag_name(string_iter &it, string_iter end) noexcept
 /// Throws ctcli::invalid_syntax_error if the syntax is invalid.
 constexpr void consume_value(string_view usage, string_iter &it, string_iter end)
 {
-	CTCLI_SYNTAX_ASSERT(it != end && (*it == '<' || *it == '{'), fmt::format("usage '{}' has invalid syntax, values must start with '<' or '{'", usage));
+	CTCLI_SYNTAX_ASSERT(it != end && (*it == '<' || *it == '{'), fmt::format("usage '{}' has invalid syntax, values must start with '<' or '{{'", usage));
 	if (*it == '<')
 	{
 		++it; // '<'
@@ -227,7 +228,7 @@ constexpr void consume_value(string_view usage, string_iter &it, string_iter end
 		} while (it != end && *it == '|' && ((void)++it, true));
 		CTCLI_SYNTAX_ASSERT(
 			it != end && *it == '}',
-			fmt::format("usage '{}' has invalid syntax, expected '}' as end of value after '{}'", usage, string_view(usage.begin(), static_cast<std::size_t>(it - usage.begin())))
+			fmt::format("usage '{}' has invalid syntax, expected '}}' as end of value after '{}'", usage, string_view(usage.begin(), static_cast<std::size_t>(it - usage.begin())))
 		);
 		++it; // '}'
 	}
