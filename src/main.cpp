@@ -1176,6 +1176,18 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return 1;
 	}
 
+	// pre-build rules
+	auto const [prebuild_exit_code, prebuild_any_run, prebuild_last_update] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	if (prebuild_exit_code != 0)
+	{
+		return prebuild_exit_code;
+	}
+
 	fill_last_modified_times(source_files);
 	analyze_source_files(
 		get_source_files_in_directory(build_config.source_directory),
@@ -1192,18 +1204,6 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return lhs_size > rhs_size || (lhs_size == rhs_size && lhs.file_path < rhs.file_path);
 	});
 	write_dependency_json(dependency_file_path, source_files);
-
-	// pre-build rules
-	auto const [prebuild_exit_code, prebuild_any_run, prebuild_last_update] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
-	if (!error.empty())
-	{
-		report_error("cppb", error);
-		return 1;
-	}
-	if (prebuild_exit_code != 0)
-	{
-		return prebuild_exit_code;
-	}
 
 	auto const build_dependency_last_update = std::max(config_last_update, prebuild_last_update);
 
