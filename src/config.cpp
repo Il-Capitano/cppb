@@ -945,7 +945,6 @@ void add_cpp_compiler_flags(cppb::vector<std::string> &args, config const &confi
 	case compiler_kind::clang:
 		for (auto const &library : config.libraries)
 		{
-			// special case for llvm
 			auto const cxxflags = get_library_cxxflags(library);
 			args.append(cxxflags);
 		}

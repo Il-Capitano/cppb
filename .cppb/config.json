@@ -8,7 +8,6 @@
 
 			"c_compiler_flags": [],
 			"cpp_compiler_flags": [],
-			"link_flags": [ "-fuse-ld=lld" ],
 
 			"run_args": [ "build", "--build-mode", "release", "--rebuild", "--config-file", "dummy_config.json" ],
 
@@ -39,12 +38,13 @@
 				},
 				"linux-release": {},
 				"windows": {
-					"cpp_compiler_flags": [ "-femulated-tls" ]
+					"cpp_compiler_flags": [ "-femulated-tls" ],
+					"link_flags": [ "-fuse-ld=lld" ]
 				},
 				"linux": {
-					"compiler": "clang-12",
+					"compiler": "clang-13",
 					"emit_compile_commands": false,
-					"link_flags": [ "-lpthread" ]
+					"link_flags": [ "-lpthread", "-fuse-ld=lld-13" ]
 				},
 				"debug": {
 					"optimization": "0"
