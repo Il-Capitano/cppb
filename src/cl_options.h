@@ -21,7 +21,7 @@ inline constexpr std::array ctcli::command_line_options<build_options> = {
 	ctcli::create_option("--build-mode {debug|release}", "Set build mode (default=debug)"),
 	ctcli::create_option("--rebuild",                    "Rebuild the whole project"),
 	ctcli::create_option("--link",                       "Force linking to happen"),
-	ctcli::create_option("--jobs <count>",               "Set the number of compiler jobs to run concurrently (default=8)", ctcli::arg_type::uint64),
+	ctcli::create_option("--jobs <count>",               "Set the number of compiler jobs to run concurrently; default is the number of cores on the machine", ctcli::arg_type::uint64),
 	ctcli::create_option("-s, --sequential",             "Don't run compilation processes concurrently"),
 	ctcli::create_option("--emit-compile-commands",      "Emit a compile_commands.json file"),
 };

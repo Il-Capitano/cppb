@@ -2110,7 +2110,7 @@ static auto &group_element_arg_value = internal::group_element_value_storage_ptr
 
 /// Returns whether the specified option has been set or not
 template<internal::group_element_index_t_ Index>
-inline bool is_option_set(void) noexcept
+inline bool is_group_element_set(void) noexcept
 {
 	return group_element_index<Index> != 0;
 }
@@ -2135,7 +2135,7 @@ static auto &group_element_arg_value = internal::group_element_value_storage_ptr
 
 /// Returns whether the specified option has been set or not
 template<internal::group_element_index_t Index>
-inline bool is_option_set(void) noexcept
+inline bool is_group_element_set(void) noexcept
 {
 	return group_element_index<Index> != 0;
 }

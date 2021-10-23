@@ -4,6 +4,8 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <thread>
+#include <utility>
 #include <fmt/color.h>
 #include "core.h"
 #include "analyze.h"
@@ -89,6 +91,14 @@ static void report_warning(std::string_view site, std::string_view message)
 
 #endif // windows
 
+static uint64_t get_job_count(void)
+{
+	auto const result = ctcli::is_option_set<"build --jobs">()
+		? ctcli::option_value<"build --jobs">
+		: std::thread::hardware_concurrency();
+	return std::max(result, uint64_t(1));
+}
+
 struct run_rule_result_t
 {
 	int exit_code;
@@ -157,7 +167,7 @@ static run_rule_result_t run_rule(
 				fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
 			}
 			std::cout << std::flush;
-			auto const [_, __, exit_code] = run_command(command, output_kind::stderr_);
+			auto const [_0, _1, exit_code] = run_command(command, output_kind::stderr_);
 			if (exit_code != 0)
 			{
 				result.exit_code = exit_code;
@@ -641,7 +651,7 @@ static build_result_t build_project_async(
 		}
 	}
 
-	auto const job_count = ctcli::option_value<"build --jobs">;
+	auto const job_count = get_job_count();
 	bool is_any_cpp = false;
 	bool any_run = false;
 	// source file compilation
@@ -1207,7 +1217,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 
 	auto const build_dependency_last_update = std::max(config_last_update, prebuild_last_update);
 
-	auto const job_count = ctcli::option_value<"build --jobs">;
+	auto const job_count = get_job_count();
 	auto [exit_code, any_run, any_cpp, object_files] =
 		(!ctcli::option_value<"build -s"> && job_count > 1)
 			? build_project_async(
@@ -1431,7 +1441,7 @@ static int run_rule_command(void)
 
 	auto const rule_to_run = ctcli::command_value<"run-rule">;
 	auto const last_modified_time = ctcli::option_value<"run-rule --force"> ? fs::file_time_type::max() : fs::file_time_type::min();
-	auto const [exit_code, _, __] = run_rule("", rule_to_run, rules, last_modified_time, error);
+	auto const [exit_code, _0, _1] = run_rule("", rule_to_run, rules, last_modified_time, error);
 
 	if (!error.empty())
 	{
