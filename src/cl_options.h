@@ -15,11 +15,11 @@ inline constexpr bool ctcli::add_verbose_option<build_options> = true;
 template<>
 inline constexpr std::array ctcli::command_line_options<build_options> = {
 	ctcli::create_option("--config-file <path>",         "Set configuration file path (default=.cppb/config.json)", ctcli::arg_type::string),
-	ctcli::create_option("--cppb-dir <dir>",             "Set directory used for chaching (default=.cppb)",         ctcli::arg_type::string),
+	ctcli::create_option("--cppb-dir <dir>",             "Set directory used for caching (default=.cppb)",          ctcli::arg_type::string),
 	ctcli::create_option("--bin-dir <dir>",              "Set binary output directory to dir> (default=bin)",       ctcli::arg_type::string),
 	ctcli::create_option("--build-config <config>",      "Set which build configuration to use (default=default)",  ctcli::arg_type::string),
 	ctcli::create_option("--build-mode {debug|release}", "Set build mode (default=debug)"),
-	ctcli::create_option("--rebuild",                    "Rebuild the whole project"),
+	ctcli::create_option("-r, --rebuild",                "Rebuild the whole project"),
 	ctcli::create_option("--link",                       "Force linking to happen"),
 	ctcli::create_option("--jobs <count>",               "Set the number of compiler jobs to run concurrently; default is the number of cores on the machine", ctcli::arg_type::uint64),
 	ctcli::create_option("-s, --sequential",             "Don't run compilation processes concurrently"),
