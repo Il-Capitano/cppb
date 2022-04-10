@@ -1,4 +1,3 @@
-CXX := clang++
 CXX_FLAGS := -std=c++20 $(shell pkg-config fmt --cflags) -O3
 LD_FLAGS := $(shell pkg-config fmt --libs)
 EXE :=
@@ -11,12 +10,15 @@ HEADERS := src/ctcli/ctcli.h src/ranges/ranges.h src/analyze.h src/cl_options.h 
 
 ifeq ($(OS),Windows_NT)
 	EXE += bin/cppb.exe
-	LD_FLAGS += -fuse-ld=lld
+	CXX = clang++
+	LD = lld
+	LD_FLAGS += -fuse-ld=$(LD)
 	CXX_FLAGS += -femulated-tls
 else
 	EXE += bin/cppb
 	CXX = clang++-13
-	LD_FLAGS += -lpthread -fuse-ld=lld-13
+	LD = lld-13
+	LD_FLAGS += -lpthread -fuse-ld=$(LD)
 endif
 
 all: $(EXE)
