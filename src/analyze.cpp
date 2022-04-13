@@ -266,7 +266,6 @@ static void add_source_file(
 
 	if (source_it != source_files.end())
 	{
-		fmt::format("duplicate file '{}'\n", source_it->file_path.generic_string());
 		return;
 	}
 
