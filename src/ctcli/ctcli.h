@@ -1517,7 +1517,9 @@ constexpr internal::group_element_index_t group_element(string_view flag_name)
 		assert(option_and_group_element.first  != "");
 		assert(option_and_group_element.second != "");
 		return [&]<std::size_t ...Is>(std::index_sequence<Is...>) {
+#ifndef NDEBUG
 			bool is_result_set = false;
+#endif // NDEBUG
 			internal::group_element_index_t result{};
 			(([&]() {
 				constexpr auto const &option = internal::get_option<internal::create_option_index(ID, static_cast<std::uint32_t>(Is))>();
@@ -1529,12 +1531,16 @@ constexpr internal::group_element_index_t group_element(string_view flag_name)
 						|| option_names.second == option_and_group_element.first
 					)
 					{
+#ifndef NDEBUG
 						is_result_set = true;
+#endif // NDEBUG
 						result = internal::get_group_element_index<option.group_id>(option_and_group_element.second);
 					}
 				}
 			}()), ...);
+#ifndef NDEBUG
 			assert(is_result_set);
+#endif // NDEBUG
 			return result;
 		}(std::make_index_sequence<
 			command_line_options<ID>.size()
@@ -1548,7 +1554,9 @@ constexpr internal::group_element_index_t group_element(string_view flag_name)
 		assert(command_and_option_and_group_element.first  != "");
 		assert(command_and_option_and_group_element.second != "");
 		return [&]<std::size_t ...Is>(std::index_sequence<Is...>) {
+#ifndef NDEBUG
 			bool is_result_set = false;
+#endif // NDEBUG
 			internal::group_element_index_t result{};
 			(([&]() {
 				constexpr auto const &command = internal::get_command<internal::create_command_index(ID, static_cast<std::uint32_t>(Is))>();
@@ -1558,11 +1566,15 @@ constexpr internal::group_element_index_t group_element(string_view flag_name)
 					|| command_names.second == command_and_option_and_group_element.first
 				)
 				{
+#ifndef NDEBUG
 					is_result_set = true;
+#endif // NDEBUG
 					result = group_element<command.options_id>(command_and_option_and_group_element.second);
 				}
 			}()), ...);
+#ifndef NDEBUG
 			assert(is_result_set);
+#endif // NDEBUG
 			return result;
 		}(std::make_index_sequence<command_line_commands<ID>.size()>{});
 	}
@@ -1598,7 +1610,9 @@ constexpr internal::option_index_t option(string_view flag_name)
 		auto const command_and_option = internal::seperate_command_and_option(flag_name);
 		assert(command_and_option.first != "");
 		return [&]<std::size_t ...Is>(std::index_sequence<Is...>) {
+#ifndef NDEBUG
 			bool is_result_set = false;
+#endif // NDEBUG
 			internal::option_index_t result{};
 			(([&]() {
 				constexpr auto const &command = internal::get_command<internal::create_command_index(ID, static_cast<std::uint32_t>(Is))>();
@@ -1608,11 +1622,15 @@ constexpr internal::option_index_t option(string_view flag_name)
 					|| command_names.second == command_and_option.first
 				)
 				{
+#ifndef NDEBUG
 					is_result_set = true;
+#endif // NDEBUG
 					result = internal::get_option_index<command.options_id>(command_and_option.second);
 				}
 			}()), ...);
+#ifndef NDEBUG
 			assert(is_result_set);
+#endif // NDEBUG
 			return result;
 		}(std::make_index_sequence<command_line_commands<ID>.size()>{});
 	}

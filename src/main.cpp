@@ -115,7 +115,8 @@ static run_rule_result_t run_rule(
 )
 {
 	auto const it = std::find_if(rules.begin(), rules.end(), [rule_to_run](auto const &rule) {
-		return rule_to_run == rule.rule_name;
+		return rule_to_run == rule.rule_name
+			|| (rule.is_file && fs::absolute(fs::path(rule_to_run)) == fs::absolute(fs::path(rule.rule_name)));
 	});
 	auto const rule_path = fs::path(rule_to_run);
 	if (it == rules.end())
@@ -183,7 +184,7 @@ static run_rule_result_t run_rule(
 }
 
 static run_rule_result_t run_rules(
-	std::string_view point_name,  // pre-build, pre-link, post-build
+	std::string_view point_name,  // pre-build, pre-link, post-build, link dependency
 	cppb::vector<std::string> const &rules_to_run,
 	cppb::vector<rule> const &rules,
 	fs::file_time_type config_last_update,
@@ -195,6 +196,29 @@ static run_rule_result_t run_rules(
 	for (auto const &rule_to_run : rules_to_run)
 	{
 		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run, rules, config_last_update, error);
+		any_rules_run |= any_run;
+		last_update_time = std::max(last_update_time, last_update);
+		if (exit_code != 0 || !error.empty())
+		{
+			return { exit_code, any_rules_run, last_update_time };
+		}
+	}
+	return { 0, any_rules_run, last_update_time };
+}
+
+static run_rule_result_t run_rules(
+	std::string_view point_name,  // pre-build, pre-link, post-build, link dependency
+	cppb::vector<fs::path> const &rules_to_run,
+	cppb::vector<rule> const &rules,
+	fs::file_time_type config_last_update,
+	std::string &error
+)
+{
+	bool any_rules_run = false;
+	fs::file_time_type last_update_time = config_last_update;
+	for (auto const &rule_to_run : rules_to_run)
+	{
+		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run.generic_string(), rules, config_last_update, error);
 		any_rules_run |= any_run;
 		last_update_time = std::max(last_update_time, last_update);
 		if (exit_code != 0 || !error.empty())
@@ -372,8 +396,6 @@ static int link_project(
 	)
 	{
 		auto const relative_executable_file_name = fs::relative(executable_file).generic_string();
-		fmt::print("linking {}\n", relative_executable_file_name);
-		std::cout << std::flush;
 		cppb::vector<std::string> link_args;
 		link_args.emplace_back("-o");
 		link_args.emplace_back(executable_file.generic_string());
@@ -381,8 +403,14 @@ static int link_project(
 		{
 			link_args.emplace_back(object_file.generic_string());
 		}
+		for (auto const &link_dependency : build_config.link_dependencies)
+		{
+			link_args.emplace_back(link_dependency.generic_string());
+		}
 		add_link_flags(link_args, build_config);
 
+		fmt::print("linking {}\n", relative_executable_file_name);
+		std::cout << std::flush;
 		if (ctcli::option_value<"build -v">)
 		{
 			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
@@ -1249,7 +1277,18 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return prelink_exit_code;
 	}
 
-	auto const link_dependency_last_update = std::max(config_last_update, prelink_last_update);
+	auto const [link_dep_exit_code, link_dep_any_run, link_dep_last_update] = run_rules("link dependency", build_config.link_dependencies, rules, config_last_update, error);
+	if (!error.empty())
+	{
+		report_error("cppb", error);
+		return 1;
+	}
+	if (link_dep_exit_code != 0)
+	{
+		return link_dep_exit_code;
+	}
+
+	auto const link_dependency_last_update = std::max({ config_last_update, prelink_last_update, link_dep_last_update });
 
 	auto const link_exit_code = link_project(project_config.project_name, build_config, bin_directory, object_files, link_dependency_last_update, any_cpp);
 	if (link_exit_code != 0)

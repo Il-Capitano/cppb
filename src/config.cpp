@@ -305,6 +305,9 @@ fill_config_member<&config::member, &config_is_set::member>(object, #member, con
 	fill_array_config_member(postbuild_rules);
 	if (!error.empty()) { return; }
 
+	fill_array_config_member(link_dependencies);
+	if (!error.empty()) { return; }
+
 	fill_regular_config_member(optimization);
 	if (!error.empty()) { return; }
 	fill_regular_config_member(emit_compile_commands);
@@ -358,6 +361,8 @@ do { if (!values_is_set.member) { values.member = source_values.member; } } whil
 	fill_default_value(prebuild_rules);
 	fill_default_value(prelink_rules);
 	fill_default_value(postbuild_rules);
+
+	fill_default_value(link_dependencies);
 
 	fill_default_value(optimization);
 	fill_default_value(emit_compile_commands);

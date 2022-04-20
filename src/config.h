@@ -38,6 +38,8 @@ struct config
 	cppb::vector<std::string> prelink_rules;
 	cppb::vector<std::string> postbuild_rules;
 
+	cppb::vector<fs::path> link_dependencies;
+
 	std::string optimization;
 	bool emit_compile_commands = false;
 };
@@ -70,6 +72,8 @@ struct config_is_set
 	bool prebuild_rules  = false;
 	bool prelink_rules   = false;
 	bool postbuild_rules = false;
+
+	bool link_dependencies = false;
 
 	bool optimization          = false;
 	bool emit_compile_commands = false;
