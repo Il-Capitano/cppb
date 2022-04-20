@@ -111,7 +111,8 @@ static run_rule_result_t run_rule(
 	std::string_view rule_to_run,
 	cppb::vector<rule> const &rules,
 	fs::file_time_type config_last_update,
-	std::string &error
+	std::string &error,
+	bool error_on_unknown_rule = true
 )
 {
 	auto const it = std::find_if(rules.begin(), rules.end(), [rule_to_run](auto const &rule) {
@@ -121,7 +122,7 @@ static run_rule_result_t run_rule(
 	auto const rule_path = fs::path(rule_to_run);
 	if (it == rules.end())
 	{
-		if (!fs::exists(rule_path))
+		if (error_on_unknown_rule && !fs::exists(rule_path))
 		{
 			error = fmt::format("'{}' is not a rule name or a file", rule_to_run);
 			return {};
@@ -136,7 +137,7 @@ static run_rule_result_t run_rule(
 	};
 	for (auto const &dependency : it->dependencies)
 	{
-		auto const [exit_code, any_run, last_update_time] = run_rule("", dependency, rules, config_last_update, error);
+		auto const [exit_code, any_run, last_update_time] = run_rule("", dependency, rules, config_last_update, error, error_on_unknown_rule);
 		if (!error.empty())
 		{
 			return {};
@@ -188,14 +189,15 @@ static run_rule_result_t run_rules(
 	cppb::vector<std::string> const &rules_to_run,
 	cppb::vector<rule> const &rules,
 	fs::file_time_type config_last_update,
-	std::string &error
+	std::string &error,
+	bool error_on_unknown_rule = true
 )
 {
 	bool any_rules_run = false;
 	fs::file_time_type last_update_time = config_last_update;
 	for (auto const &rule_to_run : rules_to_run)
 	{
-		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run, rules, config_last_update, error);
+		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run, rules, config_last_update, error, error_on_unknown_rule);
 		any_rules_run |= any_run;
 		last_update_time = std::max(last_update_time, last_update);
 		if (exit_code != 0 || !error.empty())
@@ -211,14 +213,15 @@ static run_rule_result_t run_rules(
 	cppb::vector<fs::path> const &rules_to_run,
 	cppb::vector<rule> const &rules,
 	fs::file_time_type config_last_update,
-	std::string &error
+	std::string &error,
+	bool error_on_unknown_rule = true
 )
 {
 	bool any_rules_run = false;
 	fs::file_time_type last_update_time = config_last_update;
 	for (auto const &rule_to_run : rules_to_run)
 	{
-		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run.generic_string(), rules, config_last_update, error);
+		auto const [exit_code, any_run, last_update] = run_rule(point_name, rule_to_run.generic_string(), rules, config_last_update, error, error_on_unknown_rule);
 		any_rules_run |= any_run;
 		last_update_time = std::max(last_update_time, last_update);
 		if (exit_code != 0 || !error.empty())
@@ -1277,7 +1280,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 		return prelink_exit_code;
 	}
 
-	auto const [link_dep_exit_code, link_dep_any_run, link_dep_last_update] = run_rules("link dependency", build_config.link_dependencies, rules, config_last_update, error);
+	auto const [link_dep_exit_code, link_dep_any_run, link_dep_last_update] = run_rules("link dependency", build_config.link_dependencies, rules, config_last_update, error, false);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
