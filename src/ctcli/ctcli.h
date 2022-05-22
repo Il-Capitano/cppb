@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <array>
+#include <algorithm>
 #include <initializer_list>
 #include <limits>
 #include <optional>
