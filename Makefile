@@ -16,8 +16,8 @@ ifeq ($(OS),Windows_NT)
 	CXX_FLAGS += -femulated-tls
 else
 	EXE += bin/cppb
-	CXX = clang++-13
-	LD = lld-13
+	CXX = clang++-14
+	LD = lld-14
 	LD_FLAGS += -lpthread -fuse-ld=$(LD)
 endif
 

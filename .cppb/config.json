@@ -42,9 +42,9 @@
 					"link_flags": [ "-fuse-ld=lld" ]
 				},
 				"linux": {
-					"compiler": "clang-13",
+					"compiler": "clang-14",
 					"emit_compile_commands": false,
-					"link_flags": [ "-lpthread", "-fuse-ld=lld-13" ]
+					"link_flags": [ "-lpthread", "-fuse-ld=lld-14" ]
 				},
 				"debug": {
 					"optimization": "0"
