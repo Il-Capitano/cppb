@@ -10,14 +10,25 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/istreamwrapper.h>
 
-static cppb::vector<std::string> get_library_cflags(std::string_view library)
+static cppb::vector<std::string> get_library_cflags(std::string_view library, config const &config)
 {
 	auto const cflags = [&]() {
 		if (library.substr(0, 4) == "llvm" || library.substr(0, 4) == "LLVM")
 		{
-			auto const llvm_config = library.size() == 4
-				? std::string("llvm-config")
-				: "llvm-config" + std::string(library.substr(4));
+			auto const llvm_config = [&]() -> std::string {
+				if (!config.llvm_config_path.empty())
+				{
+					return config.llvm_config_path;
+				}
+				else if (library.size() == 4)
+				{
+					return "llvm-config";
+				}
+				else
+				{
+					return "llvm_config" + std::string(library.substr(4));
+				}
+			}();
 			return capture_command_output(llvm_config, {{ "--cflags" }}).first;
 		}
 		else
@@ -44,14 +55,25 @@ static cppb::vector<std::string> get_library_cflags(std::string_view library)
 	return result;
 }
 
-static cppb::vector<std::string> get_library_cxxflags(std::string_view library)
+static cppb::vector<std::string> get_library_cxxflags(std::string_view library, config const &config)
 {
 	auto const cxxflags = [&]() {
 		if (library.substr(0, 4) == "llvm" || library.substr(0, 4) == "LLVM")
 		{
-			auto const llvm_config = library.size() == 4
-				? std::string("llvm-config")
-				: "llvm-config" + std::string(library.substr(4));
+			auto const llvm_config = [&]() -> std::string {
+				if (!config.llvm_config_path.empty())
+				{
+					return config.llvm_config_path;
+				}
+				else if (library.size() == 4)
+				{
+					return "llvm-config";
+				}
+				else
+				{
+					return "llvm-config" + std::string(library.substr(4));
+				}
+			}();
 			return capture_command_output(llvm_config, {{ "--cxxflags" }}).first;
 		}
 		else
@@ -78,14 +100,25 @@ static cppb::vector<std::string> get_library_cxxflags(std::string_view library)
 	return result;
 }
 
-static cppb::vector<std::string> get_library_libs(std::string_view library)
+static cppb::vector<std::string> get_library_libs(std::string_view library, config const &config)
 {
 	auto const libs = [&]() {
 		if (library.substr(0, 4) == "llvm" || library.substr(0, 4) == "LLVM")
 		{
-			auto const llvm_config = library.size() == 4
-				? std::string("llvm-config")
-				: "llvm-config" + std::string(library.substr(4));
+			auto const llvm_config = [&]() -> std::string {
+				if (!config.llvm_config_path.empty())
+				{
+					return config.llvm_config_path;
+				}
+				else if (library.size() == 4)
+				{
+					return "llvm-config";
+				}
+				else
+				{
+					return "llvm-config" + std::string(library.substr(4));
+				}
+			}();
 			return capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }}).first;
 		}
 		else
@@ -284,6 +317,9 @@ fill_config_member<&config::member, &config_is_set::member>(object, #member, con
 	fill_array_config_member(libraries);
 	if (!error.empty()) { return; }
 
+	fill_regular_config_member(llvm_config_path);
+	if (!error.empty()) { return; }
+
 	fill_array_config_member(run_args);
 	if (!error.empty()) { return; }
 
@@ -349,6 +385,9 @@ do { if (!values_is_set.member) { values.member = source_values.member; } } whil
 	fill_default_value(cpp_compiler_flags);
 	fill_default_value(link_flags);
 	fill_default_value(libraries);
+
+	fill_default_value(llvm_config_path);
+
 	fill_default_value(run_args);
 
 	fill_default_value(source_directory);
@@ -896,7 +935,7 @@ void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config)
 		for (auto const &library : config.libraries)
 		{
 			// special case for llvm
-			auto const cflags = get_library_cflags(library);
+			auto const cflags = get_library_cflags(library, config);
 			args.append(std::move(cflags));
 		}
 
@@ -950,7 +989,7 @@ void add_cpp_compiler_flags(cppb::vector<std::string> &args, config const &confi
 	case compiler_kind::clang:
 		for (auto const &library : config.libraries)
 		{
-			auto const cxxflags = get_library_cxxflags(library);
+			auto const cxxflags = get_library_cxxflags(library, config);
 			args.append(cxxflags);
 		}
 
@@ -1004,8 +1043,7 @@ void add_link_flags(cppb::vector<std::string> &args, config const &config)
 	case compiler_kind::clang:
 		for (auto const &library : config.libraries)
 		{
-			// special case for llvm
-			auto const libs = get_library_libs(library);
+			auto const libs = get_library_libs(library, config);
 			args.append(libs);
 		}
 		for (auto const &flag : config.link_flags)
