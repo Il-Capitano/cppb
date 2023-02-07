@@ -816,15 +816,15 @@ static build_result_t build_project_async(
 		}
 	}
 
-	if (!is_good)
-	{
-		return { 1, false, false, {} };
-	}
-
 	if (compile_commands.size() != 0)
 	{
 		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
 		write_compile_commands_json(compile_commands);
+	}
+
+	if (!is_good)
+	{
+		return { 1, false, false, {} };
 	}
 
 	return { 0, any_run, is_any_cpp, std::move(object_files) };
