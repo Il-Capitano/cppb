@@ -523,12 +523,13 @@ static cppb::vector<process_result> run_commands(cppb::vector<compiler_invocatio
 	{
 		if (compilation_futures.size() == job_count)
 		{
+			report_until_index(compilation_futures[0].first);
+
 			// wait for the next process to finish
 			auto const it = get_next_finished_it();
 
 			compilation_results[it->first] = it->second.get();
 			compilation_futures.erase(it);
-			report_until_index(compilation_futures[0].first);
 		}
 
 		auto const &invocation = compiler_invocations[i];
