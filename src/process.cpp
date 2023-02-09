@@ -118,14 +118,14 @@ static process_result run_process_without_capture(std::string command, output_ki
 
 static process_result run_process_without_capture(std::string command, output_kind output)
 {
-	assert(output != output_kind::null_);
+	assert(output != output_kind::capture);
 	if (output == output_kind::stderr_)
 	{
 		command += " 1>&2";
 	}
 
 	auto const exit_code = std::system(command.c_str());
-	return { 0, 0, WEXITSTATUS(exit_code) };
+	return { 0, 0, WEXITSTATUS(exit_code), "" };
 }
 
 #endif // windows
