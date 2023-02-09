@@ -168,7 +168,7 @@ static run_rule_result_t run_rule(
 			{
 				fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
 			}
-			std::cout << std::flush;
+			std::fflush(stdout);
 			auto const &[_0, _1, exit_code, _2] = run_command(command, output_kind::stderr_);
 			if (exit_code != 0)
 			{
@@ -241,7 +241,7 @@ static void print_command(std::string_view executable, cppb::vector<std::string>
 		command += arg;
 	}
 	fmt::print("{}\n", command);
-	std::cout << std::flush;
+	std::fflush(stdout);
 }
 
 static cppb::vector<std::string> get_common_c_compiler_flags(config const &build_config)
@@ -413,7 +413,7 @@ static int link_project(
 		add_link_flags(link_args, build_config);
 
 		fmt::print("linking {}\n", relative_executable_file_name);
-		std::cout << std::flush;
+		std::fflush(stdout);
 		if (ctcli::option_value<"build -v">)
 		{
 			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
@@ -510,6 +510,11 @@ static cppb::vector<process_result> run_commands(cppb::vector<compiler_invocatio
 			}
 
 			fmt::print("({:{}}/{}) {}\n", i + 1, index_width, compiler_invocations.size(), compiler_invocations[i].filename);
+			std::fflush(stdout);
+			if (ctcli::option_value<"build --verbose">)
+			{
+				print_command(compiler_invocations[i].compiler, compiler_invocations[i].args);
+			}
 		}
 		next_index_to_report = end + 1;
 	};
@@ -661,7 +666,7 @@ static build_result_t build_project_async(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			std::cout << std::flush;
+			std::fflush(stdout);
 			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(c_compiler, c_compiler_args);
@@ -745,7 +750,7 @@ static build_result_t build_project_async(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			std::cout << std::flush;
+			std::fflush(stdout);
 			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(cpp_compiler, cpp_compiler_args);
@@ -1019,7 +1024,7 @@ static build_result_t build_project_sequential(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			std::cout << std::flush;
+			std::fflush(stdout);
 			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(c_compiler, c_compiler_args);
@@ -1103,7 +1108,7 @@ static build_result_t build_project_sequential(
 			auto const relative_header_file_name = fs::relative(header_file).generic_string();
 
 			fmt::print("pre-compiling {}\n", relative_header_file_name);
-			std::cout << std::flush;
+			std::fflush(stdout);
 			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(cpp_compiler, cpp_compiler_args);
@@ -1172,7 +1177,7 @@ static build_result_t build_project_sequential(
 			}
 
 			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-			std::cout << std::flush;
+			std::fflush(stdout);
 			if (ctcli::option_value<"build --verbose">)
 			{
 				print_command(is_c_source ? c_compiler : cpp_compiler, args);
@@ -1463,7 +1468,7 @@ static int run_project(project_config const &project_config)
 		run_info += arg;
 	}
 	fmt::print("{}\n", run_info);
-	std::cout << std::flush;
+	std::fflush(stdout);
 	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_).exit_code;
 }
 
