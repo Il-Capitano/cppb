@@ -860,7 +860,7 @@ static build_result_t build_project_async(
 				if (result.error_count != 0 && result.warning_count != 0)
 				{
 					return fmt::format(
-						"compilation failed with {} error{} and {} warning{}; use '-s' to see compiler output",
+						"compilation failed with {} error{} and {} warning{}",
 						result.error_count, result.error_count == 1 ? "" : "s",
 						result.warning_count, result.warning_count == 1 ? "" : "s"
 					);
@@ -868,21 +868,21 @@ static build_result_t build_project_async(
 				else if (result.error_count != 0)
 				{
 					return fmt::format(
-						"compilation failed with {} error{}; use '-s' to see compiler output",
+						"compilation failed with {} error{}",
 						result.error_count, result.error_count == 1 ? "" : "s"
 					);
 				}
 				else if (result.warning_count != 0)
 				{
 					return fmt::format(
-						"{} warning{} emitted by compiler; use '-s' to see compiler output",
+						"{} warning{} emitted by compiler",
 						result.warning_count, result.warning_count == 1 ? "" : "s"
 					);
 				}
 				else // if (result.error_count == 0 && result.warning_cont == 0)
 				{
 					// this shouldn't normally happen, but we handle it anyways
-					return fmt::format("compilation failed with exit code {}; use '-s' to see compiler output", result.exit_code);
+					return fmt::format("compilation failed with exit code {}", result.exit_code);
 				}
 			}();
 			if (result.exit_code != 0 || result.error_count != 0)
