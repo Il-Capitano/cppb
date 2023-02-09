@@ -169,7 +169,7 @@ static run_rule_result_t run_rule(
 				fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
 			}
 			std::cout << std::flush;
-			auto const [_0, _1, exit_code] = run_command(command, output_kind::stderr_);
+			auto const &[_0, _1, exit_code, _2] = run_command(command, output_kind::stderr_);
 			if (exit_code != 0)
 			{
 				result.exit_code = exit_code;
@@ -428,6 +428,135 @@ static int link_project(
 	return 0;
 }
 
+struct compiler_invocation_t
+{
+	std::string compiler;
+	cppb::vector<std::string> args;
+	std::string filename;
+};
+
+struct compilation_info_t
+{
+	std::size_t index;
+	std::string filename;
+};
+
+static cppb::vector<process_result> run_commands(cppb::vector<compiler_invocation_t> const &compiler_invocations)
+{
+	auto const job_count = get_job_count();
+	assert(job_count > 1);
+
+	cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
+	cppb::vector<process_result> compilation_results;
+	compilation_results.resize(compiler_invocations.size());
+
+	auto const is_any_finished = [&]() {
+		using namespace std::chrono_literals;
+		for (auto const &[_, future] : compilation_futures)
+		{
+			if (future.wait_for(0ms) == std::future_status::ready)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
+	auto const get_next_finished_it = [&]() {
+		using namespace std::chrono_literals;
+
+		while (!is_any_finished())
+		{
+			compilation_futures[0].second.wait_for(20ms);
+		}
+
+		return std::find_if(
+			compilation_futures.begin(), compilation_futures.end(),
+			[](auto const &future) {
+				return future.second.wait_for(0ms) == std::future_status::ready;
+			}
+		);
+	};
+
+	int const index_width = [&]() {
+		auto i = compiler_invocations.size();
+		int result = 0;
+		do
+		{
+			++result;
+			i /= 10;
+		} while (i != 0);
+		return result;
+	}();
+
+	std::size_t next_index_to_report = 0;
+	auto const report_until_index = [&](std::size_t end) {
+		for (std::size_t i = next_index_to_report; i <= end; ++i)
+		{
+			if (i != 0)
+			{
+				auto const &output = compilation_results[i - 1].captured_output;
+				if (output != "")
+				{
+					if (output.ends_with('\n'))
+					{
+						fmt::print("{}", output);
+					}
+					else
+					{
+						fmt::print("{}\n", output);
+					}
+				}
+			}
+
+			fmt::print("({:{}}/{}) {}\n", i + 1, index_width, compiler_invocations.size(), compiler_invocations[i].filename);
+		}
+		next_index_to_report = end + 1;
+	};
+
+	for (std::size_t i = 0; i < compiler_invocations.size(); ++i)
+	{
+		if (compilation_futures.size() == job_count)
+		{
+			// wait for the next process to finish
+			auto const it = get_next_finished_it();
+
+			compilation_results[it->first] = it->second.get();
+			compilation_futures.erase(it);
+			report_until_index(compilation_futures[0].first);
+		}
+
+		auto const &invocation = compiler_invocations[i];
+		compilation_futures.push_back({
+			i,
+			std::async(
+				static_cast<process_result(*)(std::string_view, cppb::vector<std::string> const &, output_kind)>(run_command),
+				invocation.compiler, invocation.args, output_kind::capture
+			),
+		});
+	}
+
+	for (auto &[index, future] : compilation_futures)
+	{
+		report_until_index(index);
+		compilation_results[index] = future.get();
+	}
+	auto const &last_output = compilation_results.back().captured_output;
+	if (last_output != "")
+	{
+		if (last_output.ends_with('\n'))
+		{
+			fmt::print("{}", last_output);
+		}
+		else
+		{
+			fmt::print("{}\n", last_output);
+		}
+	}
+
+	return compilation_results;
+}
+
 static build_result_t build_project_async(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
@@ -460,46 +589,10 @@ static build_result_t build_project_async(
 		}
 	).collect<cppb::vector>();
 
-	int const compilation_units_count_width = [&]() {
-		auto i = compilation_units.size();
-		int result = 0;
-		do
-		{
-			++result;
-			i /= 10;
-		} while (i != 0);
-		return result;
-	}();
-
 	if (emit_compile_commands)
 	{
 		compile_commands.reserve(compilation_units.size());
 	}
-	cppb::vector<process_result> compilation_results;
-	cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
-	auto const is_any_future_finished = [&compilation_futures]() {
-		for (auto const &[index, future] : compilation_futures)
-		{
-			using namespace std::chrono_literals;
-			if (future.wait_for(0ms) == std::future_status::ready)
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
-	auto const get_finished_future = [&compilation_futures]() {
-		using namespace std::chrono_literals;
-		return std::find_if(
-			compilation_futures.begin(), compilation_futures.end(),
-			[](auto const &index_future) {
-				return index_future.second.wait_for(0ms) == std::future_status::ready;
-			}
-		);
-	};
-
-	compilation_results.resize(compilation_units.size());
 
 	auto const c_compiler   = get_c_compiler(build_config);
 	auto const cpp_compiler = get_cpp_compiler(build_config);
@@ -682,9 +775,10 @@ static build_result_t build_project_async(
 		}
 	}
 
-	auto const job_count = get_job_count();
 	bool is_any_cpp = false;
-	bool any_run = false;
+
+	cppb::vector<compiler_invocation_t> compiler_invocations;
+
 	// source file compilation
 	for (std::size_t i = 0; i < compilation_units.size(); ++i)
 	{
@@ -713,41 +807,14 @@ static build_result_t build_project_async(
 			|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update)
 		)
 		{
-			any_run = true;
-			auto const relative_source_file_name = fs::relative(source_file).generic_string();
-
-			if (emit_compile_commands)
-			{
-				compile_commands.push_back({ source_file_name, args });
-			}
-
-			if (compilation_futures.size() == job_count)
-			{
-				while (!is_any_future_finished())
-				{
-					using namespace std::chrono_literals;
-					compilation_futures.front().second.wait_for(20ms);
-				}
-				auto const finished = get_finished_future();
-				assert(finished != compilation_futures.end());
-				compilation_results[finished->first] = finished->second.get();
-				compilation_futures.erase(finished);
-			}
-			fmt::print("({:{}}/{}) {}\n", i + 1, compilation_units_count_width, compilation_units.size(), relative_source_file_name);
-			std::cout << std::flush;
-			if (ctcli::option_value<"build --verbose">)
-			{
-				print_command(is_c_source ? c_compiler : cpp_compiler, args);
-			}
-			compilation_futures.push_back({
-				i,
-				std::async(
-					static_cast<process_result (*)(std::string_view, cppb::vector<std::string> const &, output_kind)>(&run_command),
-					is_c_source ? c_compiler : cpp_compiler, args, output_kind::null_
-				)
+			compiler_invocations.push_back({
+				.compiler = is_c_source ? c_compiler : cpp_compiler,
+				.args = args,
+				.filename = fs::relative(source_file).generic_string(),
 			});
 		}
-		else if (emit_compile_commands)
+
+		if (emit_compile_commands)
 		{
 			compile_commands.push_back({ std::move(source_file_name), args });
 		}
@@ -762,17 +829,25 @@ static build_result_t build_project_async(
 		}
 	}
 
-	for (auto &[index, future] : compilation_futures)
+	if (compile_commands.size() != 0)
 	{
-		compilation_results[index] = future.get();
+		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
+		write_compile_commands_json(compile_commands);
 	}
 
+	if (compiler_invocations.empty())
+	{
+		return { 0, false, is_any_cpp, std::move(object_files) };
+	}
+
+	cppb::vector<process_result> compilation_results = run_commands(compiler_invocations);
+
 	bool is_good = true;
-	assert(compilation_results.size() == compilation_units.size());
+	assert(compilation_results.size() == compiler_invocations.size());
 	for (std::size_t i = 0; i < compilation_results.size(); ++i)
 	{
 		auto const result = compilation_results[i];
-		auto const relative_source_file_name = fs::relative(compilation_units[i].file_path).generic_string();
+		auto const &relative_source_file_name = compiler_invocations[i].filename;
 		if (result.exit_code != 0 || result.error_count != 0 || result.warning_count != 0)
 		{
 			is_good = is_good && result.exit_code == 0 && result.error_count == 0;
@@ -816,18 +891,12 @@ static build_result_t build_project_async(
 		}
 	}
 
-	if (compile_commands.size() != 0)
-	{
-		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
-		write_compile_commands_json(compile_commands);
-	}
-
 	if (!is_good)
 	{
 		return { 1, false, false, {} };
 	}
 
-	return { 0, any_run, is_any_cpp, std::move(object_files) };
+	return { 0, true, is_any_cpp, std::move(object_files) };
 }
 
 static build_result_t build_project_sequential(

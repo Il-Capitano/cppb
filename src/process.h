@@ -8,11 +8,12 @@ struct process_result
 	int error_count = 0;
 	int warning_count = 0;
 	int exit_code = 0;
+	std::string captured_output;
 };
 
 enum class output_kind
 {
-	stdout_, stderr_, null_,
+	stdout_, stderr_, capture
 };
 
 process_result run_command(std::string_view command, output_kind output);

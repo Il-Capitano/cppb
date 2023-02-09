@@ -8,10 +8,8 @@
 #include <windows.h>
 #endif // windows
 
-static process_result run_process_with_capture(std::string command, output_kind output)
+static process_result run_process_with_capture(std::string command)
 {
-	assert(output == output_kind::null_);
-
 	// redirect stderr to stdout for popen to capture it
 #ifdef _WIN32
 	command += " 2>&1";
@@ -36,15 +34,25 @@ static process_result run_process_with_capture(std::string command, output_kind 
 	char buffer[1024];
 	while (std::fgets(buffer, sizeof buffer, process) != nullptr)
 	{
-		auto const buffer_sv = std::string_view(buffer);
-		if (buffer_sv.find("error:") != std::string_view::npos)
-		{
-			result.error_count += 1;
-		}
-		else if (buffer_sv.find("warning:") != std::string_view::npos)
-		{
-			result.warning_count += 1;
-		}
+		result.captured_output += std::string_view(buffer);
+	}
+
+	for (
+		auto it = result.captured_output.find("error:");
+		it != std::string::npos;
+		it = result.captured_output.find("error:", it + 1)
+	)
+	{
+		result.error_count += 1;
+	}
+
+	for (
+		auto it = result.captured_output.find("warning:");
+		it != std::string::npos;
+		it = result.captured_output.find("warning:", it + 1)
+	)
+	{
+		result.warning_count += 1;
 	}
 
 	auto const exit_code = pclose(process);
@@ -60,7 +68,7 @@ static process_result run_process_with_capture(std::string command, output_kind 
 
 static process_result run_process_without_capture(std::string command, output_kind output)
 {
-	assert(output != output_kind::null_);
+	assert(output != output_kind::capture);
 
 	// taken from https://docs.microsoft.com/hu-hu/windows/win32/procthread/creating-processes?redirectedfrom=MSDN
 	STARTUPINFO si;
@@ -90,7 +98,7 @@ static process_result run_process_without_capture(std::string command, output_ki
 	)
 	{
 		fmt::print("CreateProcess failed");
-		return { 0, 0, 1 };
+		return { 0, 0, 1, "" };
 	}
 
 	// Wait until child process exits.
@@ -103,7 +111,7 @@ static process_result run_process_without_capture(std::string command, output_ki
 	CloseHandle( pi.hProcess );
 	CloseHandle( pi.hThread );
 
-	return { 0, 0, static_cast<int>(exit_code) };
+	return { 0, 0, static_cast<int>(exit_code), "" };
 }
 
 #else
@@ -124,9 +132,9 @@ static process_result run_process_without_capture(std::string command, output_ki
 
 process_result run_command(std::string_view command, output_kind output)
 {
-	if (output == output_kind::null_)
+	if (output == output_kind::capture)
 	{
-		return run_process_with_capture(std::string(command), output);
+		return run_process_with_capture(std::string(command));
 	}
 	else
 	{
