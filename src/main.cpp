@@ -1,10 +1,9 @@
 #include <cstdio>
 #include <chrono>
-#include <future>
 #include <fstream>
 #include <filesystem>
-#include <iostream>
 #include <thread>
+#include <mutex>
 #include <utility>
 #include <span>
 #include <fmt/color.h>
@@ -449,37 +448,54 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 	auto const job_count = get_job_count();
 	assert(job_count > 1);
 
-	cppb::vector<std::pair<std::size_t, std::future<process_result>>> compilation_futures;
+	auto const invocation_count = compiler_invocations.size();
+
+	cppb::vector<std::unique_ptr<std::mutex>> invocation_mutexes;
+	invocation_mutexes.reserve(invocation_count);
+	// initialize invocation_mutexes to locked; they will be unlocked once the invocation returns
+	for (std::size_t i = 0; i < invocation_count; ++i)
+	{
+		invocation_mutexes.push_back(std::make_unique<std::mutex>());
+		invocation_mutexes.back()->lock();
+	}
+
 	cppb::vector<process_result> compilation_results;
-	compilation_results.resize(compiler_invocations.size());
+	compilation_results.resize(invocation_count);
 
-	auto const is_any_finished = [&]() {
-		using namespace std::chrono_literals;
-		for (auto const &[_, future] : compilation_futures)
+	auto get_next_compiler_invocation = [
+		&compiler_invocations,
+		current_index = std::size_t(0),
+		mutex = std::mutex()
+	]() mutable -> std::optional<std::size_t> {
+		auto const guard = std::lock_guard(mutex);
+
+		if (current_index < compiler_invocations.size())
 		{
-			if (future.wait_for(0ms) == std::future_status::ready)
+			auto const result_index = current_index;
+			current_index += 1;
+			return result_index;
+		}
+		else
+		{
+			return std::nullopt;
+		}
+	};
+
+	auto thread_pool = cppb::vector<std::thread>();
+
+	for (std::size_t i = 0; i < job_count; ++i)
+	{
+		thread_pool.push_back(std::thread([&]() {
+			while (auto const invocation_index = get_next_compiler_invocation())
 			{
-				return true;
+				auto const index = *invocation_index;
+				auto const &invocation = compiler_invocations[index];
+				compilation_results[index] = run_command(invocation.compiler, invocation.args, output_kind::capture);
+				// unlock the mutex at the given index to signal that the process has finished
+				invocation_mutexes[index]->unlock();
 			}
-		}
-		return false;
-	};
-
-	auto const get_next_finished_it = [&]() {
-		using namespace std::chrono_literals;
-
-		while (!is_any_finished())
-		{
-			compilation_futures[0].second.wait_for(20ms);
-		}
-
-		return std::find_if(
-			compilation_futures.begin(), compilation_futures.end(),
-			[](auto const &future) {
-				return future.second.wait_for(0ms) == std::future_status::ready;
-			}
-		);
-	};
+		}));
+	}
 
 	int const index_width = [&]() {
 		auto i = compiler_invocations.size();
@@ -492,76 +508,39 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 		return result;
 	}();
 
-	std::size_t next_index_to_report = 0;
-	auto const report_until_index = [&](std::size_t end) {
-		for (std::size_t i = next_index_to_report; i <= end; ++i)
-		{
-			if (i != 0)
-			{
-				auto const &output = compilation_results[i - 1].captured_output;
-				if (output != "")
-				{
-					if (output.ends_with('\n'))
-					{
-						fmt::print("{}", output);
-					}
-					else
-					{
-						fmt::print("{}\n", output);
-					}
-				}
-			}
-
-			auto const filename = fs::relative(compiler_invocations[i].input_file).generic_string();
-			fmt::print("({:{}}/{}) {}\n", i + 1, index_width, compiler_invocations.size(), filename);
-			std::fflush(stdout);
-			if (ctcli::option_value<"build --verbose">)
-			{
-				print_command(compiler_invocations[i].compiler, compiler_invocations[i].args);
-			}
-		}
-		next_index_to_report = end + 1;
-	};
-
-	for (std::size_t i = 0; i < compiler_invocations.size(); ++i)
+	for (std::size_t i = 0; i < invocation_count; ++i)
 	{
-		if (compilation_futures.size() == job_count)
+		auto const filename = fs::relative(compiler_invocations[i].input_file).generic_string();
+		fmt::print("({:{}}/{}) {}\n", i + 1, index_width, compiler_invocations.size(), filename);
+		std::fflush(stdout);
+		if (ctcli::option_value<"build --verbose">)
 		{
-			report_until_index(compilation_futures[0].first);
-
-			// wait for the next process to finish
-			auto const it = get_next_finished_it();
-
-			compilation_results[it->first] = it->second.get();
-			compilation_futures.erase(it);
+			print_command(compiler_invocations[i].compiler, compiler_invocations[i].args);
 		}
 
-		auto const &invocation = compiler_invocations[i];
-		compilation_futures.push_back({
-			i,
-			std::async(
-				static_cast<process_result(*)(std::string_view, cppb::vector<std::string> const &, output_kind)>(run_command),
-				invocation.compiler, invocation.args, output_kind::capture
-			),
-		});
+		// block until the process has finished running
+		invocation_mutexes[i]->lock();
+		invocation_mutexes[i]->unlock();
+
+		// print the output of the compiler, if there is any
+		auto const &output = compilation_results[i].captured_output;
+		if (output != "")
+		{
+			if (output.ends_with('\n'))
+			{
+				fmt::print("{}", output);
+			}
+			else
+			{
+				fmt::print("{}\n", output);
+			}
+		}
 	}
 
-	for (auto &[index, future] : compilation_futures)
+	// join all the threads in the thread pool
+	for (auto &thread : thread_pool)
 	{
-		report_until_index(index);
-		compilation_results[index] = future.get();
-	}
-	auto const &last_output = compilation_results.back().captured_output;
-	if (last_output != "")
-	{
-		if (last_output.ends_with('\n'))
-		{
-			fmt::print("{}", last_output);
-		}
-		else
-		{
-			fmt::print("{}\n", last_output);
-		}
+		thread.join();
 	}
 
 	return compilation_results;
