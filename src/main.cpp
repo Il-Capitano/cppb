@@ -480,11 +480,11 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 		}
 	};
 
-	auto thread_pool = cppb::vector<std::thread>();
+	auto thread_pool = cppb::vector<std::jthread>();
 
 	for (std::size_t i = 0; i < job_count; ++i)
 	{
-		thread_pool.push_back(std::thread([&]() {
+		thread_pool.push_back(std::jthread([&]() {
 			while (auto const invocation_index = get_next_compiler_invocation())
 			{
 				auto const index = *invocation_index;
@@ -534,12 +534,6 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 				fmt::print("{}\n", output);
 			}
 		}
-	}
-
-	// join all the threads in the thread pool
-	for (auto &thread : thread_pool)
-	{
-		thread.join();
 	}
 
 	return compilation_results;
