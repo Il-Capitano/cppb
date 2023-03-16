@@ -445,18 +445,17 @@ struct compilation_info_t
 
 static cppb::vector<process_result> run_commands_async(std::span<compiler_invocation_t const> compiler_invocations)
 {
-	auto const job_count = get_job_count();
-	assert(job_count > 1);
-
 	auto const invocation_count = compiler_invocations.size();
 
-	cppb::vector<std::unique_ptr<std::mutex>> invocation_mutexes;
-	invocation_mutexes.reserve(invocation_count);
+	auto const job_count = std::min(get_job_count(), invocation_count);
+	assert(job_count > 1);
+
+	auto const invocation_mutexes_ptr = std::make_unique<std::mutex[]>(invocation_count);
+	auto const invocation_mutexes = std::span(invocation_mutexes_ptr.get(), invocation_count);
 	// initialize invocation_mutexes to locked; they will be unlocked once the invocation returns
-	for (std::size_t i = 0; i < invocation_count; ++i)
+	for (auto &m : invocation_mutexes)
 	{
-		invocation_mutexes.push_back(std::make_unique<std::mutex>());
-		invocation_mutexes.back()->lock();
+		m.lock();
 	}
 
 	cppb::vector<process_result> compilation_results;
@@ -492,7 +491,7 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 				auto const &invocation = compiler_invocations[index];
 				compilation_results[index] = run_command(invocation.compiler, invocation.args, output_kind::capture);
 				// unlock the mutex at the given index to signal that the process has finished
-				invocation_mutexes[index]->unlock();
+				invocation_mutexes[index].unlock();
 			}
 		}));
 	}
@@ -519,8 +518,8 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 		}
 
 		// block until the process has finished running
-		invocation_mutexes[i]->lock();
-		invocation_mutexes[i]->unlock();
+		invocation_mutexes[i].lock();
+		invocation_mutexes[i].unlock();
 
 		// print the output of the compiler, if there is any
 		auto const &output = compilation_results[i].captured_output;
