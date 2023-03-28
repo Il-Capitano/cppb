@@ -91,6 +91,69 @@ static void report_warning(std::string_view site, std::string_view message)
 
 #endif // windows
 
+namespace os
+{
+
+#ifdef _WIN32
+
+constexpr std::string_view executable_extension = ".exe";
+
+static std::string_view config_name(void)
+{
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
+	{
+		return "windows-debug";
+	}
+	else
+	{
+		return "windows-release";
+	}
+}
+
+static config const &get_build_config(project_config const &project_config)
+{
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
+	{
+		return project_config.windows_debug;
+	}
+	else
+	{
+		return project_config.windows_release;
+	}
+}
+
+#else
+
+constexpr std::string_view executable_extension = "";
+
+static std::string_view config_name(void)
+{
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
+	{
+		return "linux-debug";
+	}
+	else
+	{
+		return "linux-release";
+	}
+}
+
+static config const &get_build_config(project_config const &project_config)
+{
+	if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
+	{
+		return project_config.linux_debug;
+	}
+	else
+	{
+		return project_config.linux_release;
+	}
+}
+
+#endif // windows
+
+} // namespace os
+
 static uint64_t get_job_count(void)
 {
 	auto const result = ctcli::is_option_set<"build --jobs">()
@@ -365,27 +428,9 @@ static int link_project(
 	auto const cpp_compiler = get_cpp_compiler(build_config);
 
 	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = [&]() -> std::string {
-#ifdef _WIN32
-		if (project_name == "default")
-		{
-			return fmt::format("{}.exe", project_directory_name);
-		}
-		else
-		{
-			return fmt::format("{}-{}.exe", project_name, project_directory_name);
-		}
-#else
-		if (project_name == "default")
-		{
-			return project_directory_name;
-		}
-		else
-		{
-			return fmt::format("{}-{}", project_name, project_directory_name);
-		}
-#endif // windows
-	}();
+	auto const executable_file_name = project_name == "default"
+		? fmt::format("{}{}", project_directory_name, os::executable_extension)
+		: fmt::format("{}-{}{}", project_name, project_directory_name, os::executable_extension);
 
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 	auto const last_object_write_time = object_files
@@ -956,74 +1001,14 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 {
 	std::string error;
 
-	auto const &build_config = [&]() -> auto & {
-#ifdef _WIN32
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return project_config.windows_debug;
-		}
-		else
-		{
-			return project_config.windows_release;
-		}
-#else
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return project_config.linux_debug;
-		}
-		else
-		{
-			return project_config.linux_release;
-		}
-#endif // windows
-	}();
+	auto const &build_config = os::get_build_config(project_config);
 
-	auto const bin_directory = [&]() {
-#ifdef _WIN32
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-debug";
-		}
-		else
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-release";
-		}
-#else
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-debug";
-		}
-		else
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-release";
-		}
-#endif // windows
-	}();
+	auto const bin_directory = fs::path(ctcli::option_value<"build --bin-dir">) / os::config_name();
 	auto const intermediate_bin_directory = bin_directory / fmt::format("int-{}", project_config.project_name);
 	fs::create_directories(intermediate_bin_directory);
 
 	auto const cppb_dir = fs::path(ctcli::option_value<"build --cppb-dir">);
-	auto const dependency_file_path = [&]() {
-#ifdef _WIN32
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return cppb_dir / "dependencies/windows-debug.json";
-		}
-		else
-		{
-			return cppb_dir / "dependencies/windows-release.json";
-		}
-#else
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return cppb_dir / "dependencies/linux-debug.json";
-		}
-		else
-		{
-			return cppb_dir / "dependencies/linux-release.json";
-		}
-#endif // windows
-	}();
+	auto const dependency_file_path = cppb_dir / fmt::format("dependencies/{}.json", os::config_name());
 	auto source_files = read_dependency_json(dependency_file_path, error);
 	if (!error.empty())
 	{
@@ -1123,72 +1108,14 @@ static int run_project(project_config const &project_config)
 {
 	std::string error;
 
-	auto const &build_config = [&]() -> auto & {
-#ifdef _WIN32
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return project_config.windows_debug;
-		}
-		else
-		{
-			return project_config.windows_release;
-		}
-#else
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return project_config.linux_debug;
-		}
-		else
-		{
-			return project_config.linux_release;
-		}
-#endif // windows
-	}();
+	auto const &build_config = os::get_build_config(project_config);
 
-	auto const bin_directory = [&]() {
-#ifdef _WIN32
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-debug";
-		}
-		else
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "windows-release";
-		}
-#else
-		if (ctcli::option_value<"build --build-mode"> == build_mode::debug)
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-debug";
-		}
-		else
-		{
-			return fs::path(ctcli::option_value<"build --bin-dir">) / "linux-release";
-		}
-#endif // windows
-	}();
+	auto const bin_directory = fs::path(ctcli::option_value<"build --bin-dir">) / os::config_name();
 
 	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = [&]() -> std::string {
-#ifdef _WIN32
-		if (project_config.project_name == "default")
-		{
-			return fmt::format("{}.exe", project_directory_name);
-		}
-		else
-		{
-			return fmt::format("{}-{}.exe", project_config.project_name, project_directory_name);
-		}
-#else
-		if (project_config.project_name == "default")
-		{
-			return project_directory_name;
-		}
-		else
-		{
-			return fmt::format("{}-{}", project_config.project_name, project_directory_name);
-		}
-#endif // windows
-	}();
+	auto const executable_file_name = project_config.project_name == "default"
+		? fmt::format("{}{}", project_directory_name, os::executable_extension)
+		: fmt::format("{}-{}{}", project_config.project_name, project_directory_name, os::executable_extension);
 
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 
