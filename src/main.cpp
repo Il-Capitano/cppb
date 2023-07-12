@@ -788,7 +788,8 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 		result.is_any_c |= is_c_source;
 		result.is_any_cpp |= !is_c_source;
 
-		auto object_file = intermediate_bin_directory / source_file.filename();
+		auto object_file = intermediate_bin_directory / fs::relative(source_file, build_config.source_directory);
+		fs::create_directories(object_file.parent_path());
 		object_file += ".o";
 		auto const source_file_name = source_file.generic_string();
 
