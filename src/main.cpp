@@ -1039,10 +1039,35 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 			: fs::file_time_type::min(),
 		config_last_update
 	);
-	source_files.sort([](auto const &lhs, auto const &rhs) {
-		auto const lhs_size = std::distance(lhs.file_path.begin(), lhs.file_path.end());
-		auto const rhs_size = std::distance(rhs.file_path.begin(), rhs.file_path.end());
-		return lhs_size > rhs_size || (lhs_size == rhs_size && lhs.file_path < rhs.file_path);
+	source_files.sort([](source_file const &lhs, source_file const &rhs) {
+		auto lhs_it = lhs.file_path.begin();
+		auto rhs_it = rhs.file_path.begin();
+		auto const lhs_end = lhs.file_path.end();
+		auto const rhs_end = rhs.file_path.end();
+
+		while (lhs_it != lhs_end && rhs_it != rhs_end)
+		{
+			auto const compare_result = *lhs_it <=> *rhs_it;
+
+			++lhs_it;
+			++rhs_it;
+
+			if (lhs_it == lhs_end || rhs_it == rhs_end)
+			{
+				return lhs_it != lhs_end || (rhs_it == rhs_end && compare_result < 0);
+			}
+			else if (compare_result < 0)
+			{
+				return true;
+			}
+			else if (compare_result > 0)
+			{
+				return false;
+			}
+		}
+
+		// we should never get here...
+		return lhs_it != lhs_end;
 	});
 	write_dependency_json(dependency_file_path, source_files);
 
