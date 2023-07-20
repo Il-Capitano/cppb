@@ -30,6 +30,7 @@ struct config
 	cppb::vector<std::string> run_args;
 
 	fs::path source_directory;
+	cppb::vector<fs::path> excluded_sources;
 
 	cppb::vector<fs::path> include_paths;
 
@@ -67,6 +68,7 @@ struct config_is_set
 	bool run_args = false;
 
 	bool source_directory = false;
+	bool excluded_sources = false;
 
 	bool include_paths = false;
 

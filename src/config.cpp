@@ -325,6 +325,8 @@ fill_config_member<&config::member, &config_is_set::member>(object, #member, con
 
 	fill_regular_config_member(source_directory);
 	if (!error.empty()) { return; }
+	fill_array_config_member(excluded_sources);
+	if (!error.empty()) { return; }
 
 	fill_array_config_member(include_paths);
 	if (!error.empty()) { return; }
@@ -391,6 +393,7 @@ do { if (!values_is_set.member) { values.member = source_values.member; } } whil
 	fill_default_value(run_args);
 
 	fill_default_value(source_directory);
+	fill_default_value(excluded_sources);
 
 	fill_default_value(include_paths);
 
@@ -1074,6 +1077,7 @@ R"({
 			"source_directory": ")";
 		result += source_directory;
 		result += R"(",
+			"excluded_sources": [],
 			"include_paths": [],
 			"library_paths": [],
 			"libraries": [],

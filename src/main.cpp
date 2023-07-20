@@ -750,12 +750,22 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 	}
 
 	auto const compilation_units = source_files.filter(
-		[source_directory = fs::absolute(build_config.source_directory).lexically_normal()](auto const &source) {
+		[
+			source_directory = fs::absolute(build_config.source_directory).lexically_normal(),
+			excluded_sources = build_config.excluded_sources.transform(
+				[](auto const &path) { return fs::absolute(path).lexically_normal(); }
+			).collect<cppb::vector>()
+		](auto const &source) {
 			auto const source_size     = std::distance(source.file_path.begin(), source.file_path.end());
 			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
 			auto const is_in_source_directory = source_size > source_dir_size
 				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
-			return is_in_source_directory && source_extensions.is_any([&source](auto const extension) {
+			auto const is_excluded = excluded_sources.is_any([&source, source_size](auto const &excluded_source) {
+				auto const excluded_source_size = std::distance(excluded_source.begin(), excluded_source.end());
+				return source_size > excluded_source_size
+					&& std::equal(excluded_source.begin(), excluded_source.end(), source.file_path.begin());
+			});
+			return is_in_source_directory && !is_excluded && source_extensions.is_any([&source](auto const extension) {
 				return source.file_path.extension().generic_string() == extension;
 			});
 		}
