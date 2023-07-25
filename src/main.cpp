@@ -1028,7 +1028,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	}
 
 	// pre-build rules
-	auto const [prebuild_exit_code, prebuild_any_run, prebuild_last_update] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
+	auto const [prebuild_exit_code, prebuild_any_run, _] = run_rules("pre-build", build_config.prebuild_rules, rules, config_last_update, error);
 	if (!error.empty())
 	{
 		report_error("cppb", error);
@@ -1081,7 +1081,7 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	});
 	write_dependency_json(dependency_file_path, source_files);
 
-	auto const build_dependency_last_update = std::max(config_last_update, prebuild_last_update);
+	auto const build_dependency_last_update = config_last_update;
 
 	auto [exit_code, any_run, any_cpp, object_files] = build_project(
 		build_config,
