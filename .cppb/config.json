@@ -26,7 +26,8 @@
 				"no-weak-vtables",
 				"no-c++98-compat-pedantic",
 				"no-unused-template",
-				"no-zero-as-null-pointer-constant"
+				"no-zero-as-null-pointer-constant",
+				"no-unsafe-buffer-usage"
 			],
 
 			"configs": {
