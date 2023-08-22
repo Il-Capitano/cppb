@@ -703,7 +703,8 @@ static std::optional<compiler_invocation_t> get_pch_compiler_invocation(
 static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
-	fs::path const &intermediate_bin_directory
+	fs::path const &intermediate_bin_directory,
+	fs::file_time_type dependency_last_update
 )
 {
 	project_compiler_invocations_t result;
@@ -781,7 +782,7 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 			return !fs::exists(compile_commands_json)
 				|| fs::last_write_time(compile_commands_json) < source_files
 					.transform([](auto const &source) { return source.last_modified_time; })
-					.max(fs::file_time_type::min());
+					.max(dependency_last_update);
 		}();
 
 	if (emit_compile_commands)
@@ -841,7 +842,7 @@ static build_result_t build_project(
 	fs::file_time_type dependency_last_update
 )
 {
-	auto const invocations = get_compiler_invocations(build_config, source_files, intermediate_bin_directory);
+	auto const invocations = get_compiler_invocations(build_config, source_files, intermediate_bin_directory, dependency_last_update);
 	if (!invocations.has_value())
 	{
 		return {
