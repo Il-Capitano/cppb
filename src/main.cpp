@@ -232,7 +232,7 @@ static run_rule_result_t run_rule(
 				fmt::print("running {} rule '{}': {}\n", point_name, rule_to_run, command);
 			}
 			std::fflush(stdout);
-			auto const &[_0, _1, exit_code, _2] = run_command(command, output_kind::stderr_);
+			auto const &[_0, _1, exit_code, _2, _3] = run_command(command, false);
 			if (exit_code != 0)
 			{
 				result.exit_code = exit_code;
@@ -295,15 +295,9 @@ static run_rule_result_t run_rules(
 	return { 0, any_rules_run, last_update_time };
 }
 
-static void print_command(std::string_view executable, cppb::vector<std::string> const &arguments)
+static void print_command(std::string_view executable, std::span<std::string const> arguments)
 {
-	std::string command{ executable };
-	for (auto const &arg : arguments)
-	{
-		command += ' ';
-		command += arg;
-	}
-	fmt::print("{}\n", command);
+	fmt::print("{}\n", make_command_string(executable, arguments));
 	std::fflush(stdout);
 }
 
@@ -463,7 +457,7 @@ static int link_project(
 		{
 			print_command(is_any_cpp ? cpp_compiler : c_compiler, link_args);
 		}
-		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, output_kind::stderr_);
+		auto const result = run_command(is_any_cpp ? cpp_compiler : c_compiler, link_args, false);
 		if (result.exit_code != 0)
 		{
 			return result.exit_code;
@@ -534,7 +528,7 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 			{
 				auto const index = *invocation_index;
 				auto const &invocation = compiler_invocations[index];
-				compilation_results[index] = run_command(invocation.compiler, invocation.args, output_kind::capture);
+				compilation_results[index] = run_command(invocation.compiler, invocation.args, true);
 				// unlock the mutex at the given index to signal that the process has finished
 				invocation_mutexes[index].unlock();
 			}
@@ -567,7 +561,7 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 		invocation_mutexes[i].unlock();
 
 		// print the output of the compiler, if there is any
-		auto const &output = compilation_results[i].captured_output;
+		auto const output = compilation_results[i].stdout_string + compilation_results[i].stderr_string;
 		if (output != "")
 		{
 			if (output.ends_with('\n'))
@@ -608,7 +602,7 @@ static int run_commands_sequential(std::span<compiler_invocation_t const> compil
 			print_command(invocation.compiler, invocation.args);
 		}
 
-		auto const result = run_command(invocation.compiler, invocation.args, output_kind::stderr_);
+		auto const result = run_command(invocation.compiler, invocation.args, false);
 		if (result.exit_code != 0)
 		{
 			return result.exit_code;
@@ -874,7 +868,7 @@ static build_result_t build_project(
 			{
 				print_command(invocations->c_pch->compiler, invocations->c_pch->args);
 			}
-			auto const result = run_command(invocations->c_pch->compiler, invocations->c_pch->args, output_kind::stderr_);
+			auto const result = run_command(invocations->c_pch->compiler, invocations->c_pch->args, false);
 			if (result.exit_code != 0)
 			{
 				return { result.exit_code, false, false, {} };
@@ -903,7 +897,7 @@ static build_result_t build_project(
 			{
 				print_command(invocations->cpp_pch->compiler, invocations->cpp_pch->args);
 			}
-			auto const result = run_command(invocations->cpp_pch->compiler, invocations->cpp_pch->args, output_kind::stderr_);
+			auto const result = run_command(invocations->cpp_pch->compiler, invocations->cpp_pch->args, false);
 			if (result.exit_code != 0)
 			{
 				return { result.exit_code, false, false, {} };
@@ -941,7 +935,7 @@ static build_result_t build_project(
 
 	auto const job_count = get_job_count();
 
-	if (!ctcli::option_value<"build -s"> && job_count > 1)
+	if (!ctcli::option_value<"build -s"> && job_count > 1 && compiler_invocations.size() > 1)
 	{
 		cppb::vector<process_result> compilation_results = run_commands_async(compiler_invocations);
 
@@ -1164,7 +1158,7 @@ static int run_project(project_config const &project_config)
 	}
 	fmt::print("{}\n", run_info);
 	std::fflush(stdout);
-	return run_command(executable_file.string(), build_config.run_args, output_kind::stdout_).exit_code;
+	return run_command(executable_file.string(), build_config.run_args, false).exit_code;
 }
 
 static int build_command(void)

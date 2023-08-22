@@ -29,11 +29,13 @@ static cppb::vector<std::string> get_library_cflags(std::string_view library, co
 					return "llvm_config" + std::string(library.substr(4));
 				}
 			}();
-			return capture_command_output(llvm_config, {{ "--cflags" }}).first;
+			auto [flags, is_good] = capture_command_output(llvm_config, {{ "--cflags" }});
+			return is_good ? std::move(flags) : "";
 		}
 		else
 		{
-			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }}).first;
+			auto [flags, is_good] = capture_command_output("pkg-config", {{ "--cflags", std::string(library) }});
+			return is_good ? std::move(flags) : "";
 		}
 	}();
 	std::string_view remaining = cflags;
@@ -74,11 +76,13 @@ static cppb::vector<std::string> get_library_cxxflags(std::string_view library, 
 					return "llvm-config" + std::string(library.substr(4));
 				}
 			}();
-			return capture_command_output(llvm_config, {{ "--cxxflags" }}).first;
+			auto [flags, is_good] = capture_command_output(llvm_config, {{ "--cxxflags" }});
+			return is_good ? std::move(flags) : "";
 		}
 		else
 		{
-			return capture_command_output("pkg-config", {{ "--cflags", std::string(library) }}).first;
+			auto [flags, is_good] = capture_command_output("pkg-config", {{ "--cflags", std::string(library) }});
+			return is_good ? std::move(flags) : "";
 		}
 	}();
 	std::string_view remaining = cxxflags;
@@ -119,19 +123,13 @@ static cppb::vector<std::string> get_library_libs(std::string_view library, conf
 					return "llvm-config" + std::string(library.substr(4));
 				}
 			}();
-			return capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }}).first;
+			auto [flags, is_good] = capture_command_output(llvm_config, {{ "--ldflags", "--libs", "--system-libs" }});
+			return is_good ? std::move(flags) : "";
 		}
 		else
 		{
-			auto [result, is_valid] = capture_command_output("pkg-config", {{ "--libs", std::string(library) }});
-			if (is_valid)
-			{
-				return result;
-			}
-			else
-			{
-				return fmt::format("-l{}", library);
-			}
+			auto [flags, is_good] = capture_command_output("pkg-config", {{ "--libs", std::string(library) }});
+			return is_good ? std::move(flags) : fmt::format("-l{}", library);
 		}
 	}();
 	std::string_view remaining = libs;
