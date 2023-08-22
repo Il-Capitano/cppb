@@ -708,7 +708,7 @@ static cppb::vector<project_config> get_project_configs(rapidjson::Document::Obj
 		cppb::vector<config_object_pair> result;
 		auto const begin = object.begin();
 		auto const end   = object.end();
-		for (auto it = begin; it.operator->() != end.operator->(); ++it)
+		for (auto it = begin; it != end; ++it)
 		{
 			auto const &member = *it;
 			assert(member.name.IsString());
@@ -763,15 +763,15 @@ static cppb::vector<std::string> get_string_array(rapidjson::Document::Array arr
 	return result;
 }
 
-static rule get_rule(std::string_view name, rapidjson::Document::Object object, std::string &error)
+static os_specific_rule get_os_specific_rule(rapidjson::Document::Object object, std::string &error)
 {
-	rule result;
-	result.rule_name = name;
+	os_specific_rule result;
 
-	auto const end = object.MemberEnd().operator->();
+	auto const end = object.MemberEnd();
 	// dependencies
+
 	auto const dependencies_it = object.FindMember("dependencies");
-	if (dependencies_it.operator->() != end)
+	if (dependencies_it != end)
 	{
 		if (!dependencies_it->value.IsArray())
 		{
@@ -788,12 +788,12 @@ static rule get_rule(std::string_view name, rapidjson::Document::Object object, 
 	// command or commands
 	auto const command_it = object.FindMember("command");
 	auto const commands_it = object.FindMember("commands");
-	if (command_it.operator->() != end && commands_it.operator->() != end)
+	if (command_it != end && commands_it != end)
 	{
 		error = "only one of 'command' or 'commands' may be provided in a rule";
 		return {};
 	}
-	else if (command_it.operator->() != end)
+	else if (command_it != end)
 	{
 		if (!command_it->value.IsString())
 		{
@@ -802,7 +802,7 @@ static rule get_rule(std::string_view name, rapidjson::Document::Object object, 
 		}
 		result.commands.push_back(command_it->value.GetString());
 	}
-	else if (commands_it.operator->() != end)
+	else if (commands_it != end)
 	{
 		if (!commands_it->value.IsArray())
 		{
@@ -818,7 +818,7 @@ static rule get_rule(std::string_view name, rapidjson::Document::Object object, 
 
 	// is_file
 	auto const is_file_it = object.FindMember("is_file");
-	if (is_file_it.operator->() != end)
+	if (is_file_it != end)
 	{
 		if (!is_file_it->value.IsBool())
 		{
@@ -831,6 +831,53 @@ static rule get_rule(std::string_view name, rapidjson::Document::Object object, 
 	return result;
 }
 
+static rule get_rule(std::string_view name, rapidjson::Document::Object object, std::string &error)
+{
+	rule result;
+	result.rule_name = name;
+
+	auto const windows_it = object.FindMember("windows");
+	auto const linux_it = object.FindMember("linux");
+	if (windows_it == object.MemberEnd() && linux_it == object.MemberEnd())
+	{
+		result.windows_rule = get_os_specific_rule(object, error);
+		result.linux_rule = result.windows_rule;
+	}
+	else if (windows_it == object.MemberEnd() || linux_it == object.MemberEnd())
+	{
+		if (windows_it == object.MemberEnd())
+		{
+			error = "member 'windows' must be specified when 'linux' is also specified";
+		}
+		else
+		{
+			error = "member 'linux' must be specified when 'windows' is also specified";
+		}
+		return {};
+	}
+	else
+	{
+		if (!windows_it->value.IsObject())
+		{
+			error = "value for member 'windows' must be an 'Object'";
+			return {};
+		}
+		if (!linux_it->value.IsObject())
+		{
+			error = "value for member 'windows' must be an 'Object'";
+			return {};
+		}
+
+		auto const windows_object = windows_it->value.GetObject();
+		result.windows_rule = get_os_specific_rule(windows_object, error);
+
+		auto const linux_object = linux_it->value.GetObject();
+		result.linux_rule = get_os_specific_rule(linux_object, error);
+	}
+
+	return result;
+}
+
 static cppb::vector<rule> get_rules(rapidjson::Document::Object object, std::string &error)
 {
 	cppb::vector<rule> result;
@@ -838,7 +885,7 @@ static cppb::vector<rule> get_rules(rapidjson::Document::Object object, std::str
 	result.reserve(object.MemberCount());
 	auto it = object.MemberBegin();
 	auto const end = object.MemberEnd();
-	for (; it.operator->() != end.operator->(); ++it)
+	for (; it != end; ++it)
 	{
 		auto &[name, value] = *it;
 
@@ -888,7 +935,7 @@ config_file read_config_json(fs::path const &dep_file_path, std::string &error)
 	auto result = config_file{};
 
 	auto const projects_object_it = object.FindMember("projects");
-	if (projects_object_it.operator->() == object.MemberEnd().operator->())
+	if (projects_object_it == object.MemberEnd())
 	{
 		error = "unable to find 'projects' field in configuration file";
 		return {};
@@ -907,7 +954,7 @@ config_file read_config_json(fs::path const &dep_file_path, std::string &error)
 	}
 
 	auto const rules_object_it = object.FindMember("rules");
-	if (rules_object_it.operator->() == object.MemberEnd().operator->())
+	if (rules_object_it == object.MemberEnd())
 	{
 		return result;
 	}

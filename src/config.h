@@ -102,12 +102,18 @@ struct project_config_is_set
 	config_is_set linux_release;
 };
 
-struct rule
+struct os_specific_rule
 {
-	std::string               rule_name{};
 	cppb::vector<std::string> dependencies{};
 	cppb::vector<std::string> commands{};
 	bool                      is_file = true;
+};
+
+struct rule
+{
+	std::string      rule_name{};
+	os_specific_rule windows_rule{};
+	os_specific_rule linux_rule{};
 };
 
 struct config_file

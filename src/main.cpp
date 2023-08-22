@@ -97,6 +97,7 @@ namespace os
 #ifdef _WIN32
 
 constexpr std::string_view executable_extension = ".exe";
+constexpr os_specific_rule rule::*rule_member = &rule::windows_rule;
 
 static std::string_view config_name(void)
 {
@@ -125,6 +126,7 @@ static config const &get_build_config(project_config const &project_config)
 #else
 
 constexpr std::string_view executable_extension = "";
+constexpr os_specific_rule rule::*rule_member = &rule::linux_rule;
 
 static std::string_view config_name(void)
 {
@@ -180,7 +182,7 @@ static run_rule_result_t run_rule(
 {
 	auto const it = std::find_if(rules.begin(), rules.end(), [rule_to_run](auto const &rule) {
 		return rule_to_run == rule.rule_name
-			|| (rule.is_file && fs::absolute(fs::path(rule_to_run)) == fs::absolute(fs::path(rule.rule_name)));
+			|| ((rule.*os::rule_member).is_file && fs::absolute(fs::path(rule_to_run)) == fs::absolute(fs::path(rule.rule_name)));
 	});
 	auto const rule_path = fs::path(rule_to_run);
 	if (it == rules.end())
@@ -193,12 +195,14 @@ static run_rule_result_t run_rule(
 		return { 0, false, fs::last_write_time(rule_path) };
 	}
 
+	auto const &it_os_rule = (*it).*os::rule_member;
+
 	auto const last_rule_write_time = fs::exists(rule_path) ? fs::last_write_time(rule_path) : fs::file_time_type::min();
 	run_rule_result_t result = {
 		0, false,
-		it->is_file ? last_rule_write_time : fs::file_time_type::min()
+		it_os_rule.is_file ? last_rule_write_time : fs::file_time_type::min()
 	};
-	for (auto const &dependency : it->dependencies)
+	for (auto const &dependency : it_os_rule.dependencies)
 	{
 		auto const [exit_code, any_run, last_update_time] = run_rule("", dependency, rules, config_last_update, error, error_on_unknown_rule);
 		if (!error.empty())
@@ -215,13 +219,13 @@ static run_rule_result_t run_rule(
 	}
 
 	if (
-		!it->is_file
+		!it_os_rule.is_file
 		|| !fs::exists(rule_path)
 		|| last_rule_write_time < std::max(config_last_update, result.last_update_time)
 	)
 	{
 		result.any_run = true;
-		for (auto const &command : it->commands)
+		for (auto const &command : it_os_rule.commands)
 		{
 			if (point_name.empty())
 			{
@@ -239,7 +243,7 @@ static run_rule_result_t run_rule(
 				return result;
 			}
 		}
-		if (it->is_file && fs::exists(rule_path))
+		if (it_os_rule.is_file && fs::exists(rule_path))
 		{
 			result.last_update_time = fs::last_write_time(rule_path);
 		}
