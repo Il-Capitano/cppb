@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -109,132 +110,147 @@ private:
 	LPPROC_THREAD_ATTRIBUTE_LIST _attribute_list;
 };
 
-// https://stackoverflow.com/a/46348112/11488457
-static process_result run_process(std::string_view command_line, bool capture)
+// https://devblogs.microsoft.com/oldnewthing/20111216-00/?p=8873
+static BOOL CreateProcessWithExplicitHandles(
+	LPCTSTR lpApplicationName,
+	LPTSTR lpCommandLine,
+	LPSECURITY_ATTRIBUTES lpProcessAttributes,
+	LPSECURITY_ATTRIBUTES lpThreadAttributes,
+	BOOL bInheritHandles,
+	DWORD dwCreationFlags,
+	LPVOID lpEnvironment,
+	LPCTSTR lpCurrentDirectory,
+	LPSTARTUPINFO lpStartupInfo,
+	LPPROCESS_INFORMATION lpProcessInformation,
+	DWORD cHandlesToInherit,
+	HANDLE *rgHandlesToInherit
+)
+{
+	BOOL fSuccess;
+	BOOL fInitialized = FALSE;
+	SIZE_T size = 0;
+	LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList = nullptr;
+	fSuccess = cHandlesToInherit < 0xFFFFFFFF / sizeof(HANDLE) && lpStartupInfo->cb == sizeof(*lpStartupInfo);
+	if (!fSuccess) {
+		SetLastError(ERROR_INVALID_PARAMETER);
+	}
+	if (fSuccess) {
+		fSuccess = InitializeProcThreadAttributeList(nullptr, 1, 0, &size) || GetLastError() == ERROR_INSUFFICIENT_BUFFER;
+	}
+	if (fSuccess) {
+		lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(HeapAlloc(GetProcessHeap(), 0, size));
+		fSuccess = lpAttributeList != nullptr;
+	}
+	if (fSuccess) {
+		fSuccess = InitializeProcThreadAttributeList(lpAttributeList, 1, 0, &size);
+	}
+	if (fSuccess) {
+		fInitialized = TRUE;
+		fSuccess = UpdateProcThreadAttribute(
+			lpAttributeList,
+			0,
+			PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+			rgHandlesToInherit,
+			cHandlesToInherit * sizeof(HANDLE),
+			nullptr,
+			nullptr
+		);
+	}
+	if (fSuccess) {
+		STARTUPINFOEX info;
+		ZeroMemory(&info, sizeof(info));
+		info.StartupInfo = *lpStartupInfo;
+		info.StartupInfo.cb = sizeof(info);
+		info.lpAttributeList = lpAttributeList;
+		fSuccess = CreateProcess(
+			lpApplicationName,
+			lpCommandLine,
+			lpProcessAttributes,
+			lpThreadAttributes,
+			bInheritHandles,
+			dwCreationFlags | EXTENDED_STARTUPINFO_PRESENT,
+			lpEnvironment,
+			lpCurrentDirectory,
+			&info.StartupInfo,
+			lpProcessInformation
+		);
+	}
+	if (fInitialized) DeleteProcThreadAttributeList(lpAttributeList);
+	if (lpAttributeList) HeapFree(GetProcessHeap(), 0, lpAttributeList);
+	return fSuccess;
+}
+
+static process_result run_process_with_capture(std::string_view command_line)
 {
 	auto result = process_result();
-
-	SECURITY_ATTRIBUTES  security_attributes = {
-		.nLength = sizeof (SECURITY_ATTRIBUTES),
-		.lpSecurityDescriptor = nullptr,
-		.bInheritHandle = TRUE,
-	};
-
-	HANDLE stdout_reader = INVALID_HANDLE_VALUE;
-	HANDLE stdout_writer = INVALID_HANDLE_VALUE;
-	if (capture && !CreatePipe(&stdout_reader, &stdout_writer, &security_attributes, 0))
-	{
-		result.exit_code = -1;
-		return result;
-	}
-	auto stdout_reader_closer = handle_closer(stdout_reader);
-	auto stdout_writer_closer = handle_closer(stdout_writer);
-
-	HANDLE stderr_reader = INVALID_HANDLE_VALUE;
-	HANDLE stderr_writer = INVALID_HANDLE_VALUE;
-	if (capture && !CreatePipe(&stderr_reader, &stderr_writer, &security_attributes, 0))
-	{
-		result.exit_code = -1;
-		return result;
-	}
-	auto stderr_reader_closer = handle_closer(stderr_reader);
-	auto stderr_writer_closer = handle_closer(stderr_writer);
 
 	// Make a copy because CreateProcess needs to modify string buffer
 	auto command_line_str = std::string(command_line);
 
+	HANDLE stdout_reader = INVALID_HANDLE_VALUE;
+	HANDLE stdout_writer = INVALID_HANDLE_VALUE;
+
+	HANDLE stderr_reader = INVALID_HANDLE_VALUE;
+	HANDLE stderr_writer = INVALID_HANDLE_VALUE;
+
 	PROCESS_INFORMATION process_info;
 	ZeroMemory(&process_info, sizeof (PROCESS_INFORMATION));
 
+	SECURITY_ATTRIBUTES security_attributes;
+	ZeroMemory(&security_attributes, sizeof (SECURITY_ATTRIBUTES));
+	security_attributes.nLength = sizeof (SECURITY_ATTRIBUTES);
+	security_attributes.lpSecurityDescriptor = nullptr;
+	security_attributes.bInheritHandle = TRUE;
+
 	WINBOOL success = TRUE;
-	if (stdout_writer == INVALID_HANDLE_VALUE)
+	if (success)
 	{
-		STARTUPINFO startup_info;
-		ZeroMemory(&startup_info, sizeof (STARTUPINFO));
-		startup_info.cb = sizeof (STARTUPINFO);
-
-		success = CreateProcess(
-			nullptr,
-			command_line_str.data(),
-			nullptr,
-			nullptr,
-			FALSE,
-			0,
-			nullptr,
-			nullptr,
-			&startup_info,
-			&process_info
-		);
+		success = CreatePipe(&stdout_reader, &stdout_writer, &security_attributes, 0) && SetHandleInformation(stdout_reader, HANDLE_FLAG_INHERIT, 0);
 	}
-	else
+	auto stdout_reader_closer = handle_closer(stdout_reader);
+	auto stdout_writer_closer = handle_closer(stdout_writer);
+	if (success)
 	{
-		// https://devblogs.microsoft.com/oldnewthing/20111216-00/?p=8873
-		LPPROC_THREAD_ATTRIBUTE_LIST attribute_list = nullptr;
-		auto const list_freer = attribute_list_freer(attribute_list);
-		SIZE_T size = 0;
-		success = InitializeProcThreadAttributeList(nullptr, 1, 0, &size) || GetLastError() == ERROR_INSUFFICIENT_BUFFER;
-
-		if (success)
-		{
-			attribute_list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(HeapAlloc(GetProcessHeap(), 0, size));
-			success = attribute_list != nullptr;
-		}
-
-		if (success)
-		{
-			success = InitializeProcThreadAttributeList(attribute_list, 1, 0, &size);
-		}
-
-		auto const list_deleter = attribute_list_deleter(success ? attribute_list : nullptr);
-		HANDLE handles_to_inherit[] = {
-			stdout_writer,
-			stderr_writer,
-		};
-		if (success)
-		{
-			success = UpdateProcThreadAttribute(
-				attribute_list,
-				0,
-				PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-				handles_to_inherit,
-				2 * sizeof (HANDLE),
-				nullptr,
-				nullptr
-			);
-		}
-
-		if (success)
-		{
-			STARTUPINFOEX startup_info = {
-				.StartupInfo = {
-					.cb = sizeof (STARTUPINFO),
-					.hStdInput = 0,
-					.hStdOutput = stdout_writer,
-					.hStdError = stderr_writer,
-				},
-				.lpAttributeList = attribute_list,
-			};
-
-			startup_info.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
-			success = CreateProcess(
-				nullptr,
-				command_line_str.data(),
-				nullptr,
-				nullptr,
-				TRUE,
-				EXTENDED_STARTUPINFO_PRESENT,
-				nullptr,
-				nullptr,
-				&startup_info.StartupInfo,
-				&process_info
-			);
-		}
+		success = CreatePipe(&stderr_reader, &stderr_writer, &security_attributes, 0) && SetHandleInformation(stderr_reader, HANDLE_FLAG_INHERIT, 0);
 	}
+	auto stderr_reader_closer = handle_closer(stderr_reader);
+	auto stderr_writer_closer = handle_closer(stderr_writer);
+
+	if (!success)
+	{
+		result.exit_code = -1;
+		return result;
+	}
+
+	STARTUPINFO startup_info;
+	ZeroMemory(&startup_info, sizeof (STARTUPINFO));
+	startup_info.cb = sizeof (STARTUPINFO);
+	startup_info.hStdOutput = stdout_writer;
+	startup_info.hStdError = stderr_writer;
+	startup_info.dwFlags |= STARTF_USESTDHANDLES;
+
+	std::array<HANDLE, 2> handles_to_inherit = { stdout_writer, stderr_writer };
+	success = CreateProcessWithExplicitHandles(
+		nullptr,
+		command_line_str.data(),
+		nullptr,
+		nullptr,
+		TRUE,
+		0,
+		nullptr,
+		nullptr,
+		&startup_info,
+		&process_info,
+		static_cast<DWORD>(handles_to_inherit.size()),
+		handles_to_inherit.data()
+	);
 	auto process_closer = handle_closer(process_info.hProcess);
 	auto thread_closer = handle_closer(process_info.hThread);
 
 	stdout_writer_closer.reset();
 	stderr_writer_closer.reset();
+
+	thread_closer.reset();
 
 	if(!success)
 	{
@@ -242,50 +258,114 @@ static process_result run_process(std::string_view command_line, bool capture)
 		return result;
 	}
 
-	thread_closer.reset();
-
-	if (capture && (stdout_reader || stderr_reader))
 	{
-		std::array<char, 1024> buffer = {};
-		WINBOOL stdout_success = TRUE;
-		WINBOOL stderr_success = TRUE;
-		while (stdout_success || stderr_success)
-		{
-			if (stdout_reader)
+		// stdout and stderr need to be read simultaneously, otherwise the buffer fills up, and blocks reads
+		auto stdout_reader_thread = std::jthread([&result, stdout_reader]() {
+			std::array<char, 1024> buffer = {};
+			while (true)
 			{
 				DWORD read_size = 0;
-				stdout_success = ReadFile(
+				auto stdout_success = ReadFile(
 					stdout_reader,
 					buffer.data(),
 					static_cast<DWORD>(buffer.size()),
 					&read_size,
 					nullptr
 				);
-				stdout_success = stdout_success && read_size != 0;
-				if (stdout_success)
+				if (!stdout_success || read_size == 0)
 				{
-					result.stdout_string += std::string_view(buffer.data(), read_size);
+					break;
 				}
+				result.stdout_string += std::string_view(buffer.data(), read_size);
 			}
-
-			if (stderr_reader)
+		});
+		auto stderr_reader_thread = std::jthread([&result, stderr_reader]() {
+			std::array<char, 1024> buffer = {};
+			while (true)
 			{
 				DWORD read_size = 0;
-				stderr_success = ReadFile(
+				auto stdout_success = ReadFile(
 					stderr_reader,
 					buffer.data(),
 					static_cast<DWORD>(buffer.size()),
 					&read_size,
 					nullptr
 				);
-				stderr_success = stderr_success && read_size != 0;
-				if (stderr_success)
+				if (!stdout_success || read_size == 0)
 				{
-					result.stderr_string += std::string_view(buffer.data(), read_size);
+					break;
 				}
+				result.stderr_string += std::string_view(buffer.data(), read_size);
 			}
-		}
+		});
 	}
+
+	WaitForSingleObject(process_info.hProcess, INFINITE);
+
+	DWORD exit_code = 0;
+	if(GetExitCodeProcess(process_info.hProcess, &exit_code))
+	{
+		result.exit_code = static_cast<int>(exit_code);
+	}
+	else
+	{
+		result.exit_code = -1;
+	}
+
+	for (
+		auto it = result.stderr_string.find("error:");
+		it != std::string::npos;
+		it = result.stderr_string.find("error:", it + 1)
+	)
+	{
+		result.error_count += 1;
+	}
+	for (
+		auto it = result.stderr_string.find("warning:");
+		it != std::string::npos;
+		it = result.stderr_string.find("warning:", it + 1)
+	)
+	{
+		result.warning_count += 1;
+	}
+
+	return result;
+}
+
+static process_result run_process_without_capture(std::string_view command_line)
+{
+	auto result = process_result();
+
+	// Make a copy because CreateProcess needs to modify string buffer
+	auto command_line_str = std::string(command_line);
+
+	PROCESS_INFORMATION process_info;
+	ZeroMemory(&process_info, sizeof (PROCESS_INFORMATION));
+
+	STARTUPINFO startup_info;
+	ZeroMemory(&startup_info, sizeof (STARTUPINFO));
+	startup_info.cb = sizeof (STARTUPINFO);
+
+	auto success = CreateProcess(
+		nullptr,
+		command_line_str.data(),
+		nullptr,
+		nullptr,
+		FALSE,
+		0,
+		nullptr,
+		nullptr,
+		&startup_info,
+		&process_info
+	);
+	if (!success)
+	{
+		result.exit_code = -1;
+		return result;
+	}
+
+	auto process_closer = handle_closer(process_info.hProcess);
+	auto thread_closer = handle_closer(process_info.hThread);
 
 	WaitForSingleObject(process_info.hProcess, INFINITE);
 	DWORD exit_code = 0;
@@ -298,27 +378,20 @@ static process_result run_process(std::string_view command_line, bool capture)
 		result.exit_code = -1;
 	}
 
+	return result;
+}
+
+// https://stackoverflow.com/a/46348112/11488457
+static process_result run_process(std::string_view command_line, bool capture)
+{
 	if (capture)
 	{
-		for (
-			auto it = result.stderr_string.find("error:");
-			it != std::string::npos;
-			it = result.stderr_string.find("error:", it + 1)
-		)
-		{
-			result.error_count += 1;
-		}
-		for (
-			auto it = result.stderr_string.find("warning:");
-			it != std::string::npos;
-			it = result.stderr_string.find("warning:", it + 1)
-		)
-		{
-			result.warning_count += 1;
-		}
+		return run_process_with_capture(command_line);
 	}
-
-	return result;
+	else
+	{
+		return run_process_without_capture(command_line);
+	}
 }
 
 static void write_escaped_string(std::string &buffer, std::string_view str)
@@ -482,28 +555,31 @@ static process_result run_process(std::string_view command_line, bool capture)
 
 		if (capture)
 		{
-			std::array<char, 1024> buffer = {};
-			while (true)
-			{
-				// read stdout
-				auto const stdout_read_size = read(stdout_pipe[PIPE_READ], buffer.data(), buffer.size());
-				if (stdout_read_size != 0)
+			// stdout and stderr need to be read simultaneously, otherwise the buffer fills up, and blocks reads
+			auto stdout_reader_thread = std::jthread([&result, stdout_read_pipe = stdout_pipe[PIPE_READ]]() {
+				std::array<char, 1024> buffer = {};
+				while (true)
 				{
-					result.stdout_string += std::string_view(buffer.data(), static_cast<size_t>(stdout_read_size));
+					auto const read_size = read(stdout_read_pipe, buffer.data(), buffer.size());
+					if (read_size == 0)
+					{
+						break;
+					}
+					result.stdout_string += std::string_view(buffer.data(), static_cast<size_t>(read_size));
 				}
-
-				// read stderr
-				auto const stderr_read_size = read(stderr_pipe[PIPE_READ], buffer.data(), buffer.size());
-				if (stderr_read_size != 0)
+			});
+			auto stderr_reader_thread = std::jthread([&result, stderr_read_pipe = stderr_pipe[PIPE_READ]]() {
+				std::array<char, 1024> buffer = {};
+				while (true)
 				{
-					result.stderr_string += std::string_view(buffer.data(), static_cast<size_t>(stderr_read_size));
+					auto const read_size = read(stderr_read_pipe, buffer.data(), buffer.size());
+					if (read_size == 0)
+					{
+						break;
+					}
+					result.stderr_string += std::string_view(buffer.data(), static_cast<size_t>(read_size));
 				}
-
-				if (stdout_read_size == 0 && stderr_read_size == 0)
-				{
-					break;
-				}
-			}
+			});
 		}
 
 		int status;
