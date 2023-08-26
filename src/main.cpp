@@ -12,6 +12,7 @@
 #include "config.h"
 #include "process.h"
 #include "cl_options.h"
+#include "thread_pool.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -493,51 +494,10 @@ static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invoc
 	auto const job_count = std::min(get_job_count(), invocation_count);
 	assert(job_count > 1);
 
-	auto const invocation_mutexes_ptr = std::make_unique<std::mutex[]>(invocation_count);
-	auto const invocation_mutexes = std::span(invocation_mutexes_ptr.get(), invocation_count);
-	// initialize invocation_mutexes to locked; they will be unlocked once the invocation returns
-	for (auto &m : invocation_mutexes)
-	{
-		m.lock();
-	}
-
-	cppb::vector<process_result> compilation_results;
-	compilation_results.resize(invocation_count);
-
-	auto get_next_compiler_invocation = [
-		&compiler_invocations,
-		current_index = std::size_t(0),
-		mutex = std::mutex()
-	]() mutable -> std::optional<std::size_t> {
-		auto const guard = std::lock_guard(mutex);
-
-		if (current_index < compiler_invocations.size())
-		{
-			auto const result_index = current_index;
-			current_index += 1;
-			return result_index;
-		}
-		else
-		{
-			return std::nullopt;
-		}
-	};
-
-	auto thread_pool = cppb::vector<std::jthread>();
-
-	for (std::size_t i = 0; i < job_count; ++i)
-	{
-		thread_pool.push_back(std::jthread([&]() {
-			while (auto const invocation_index = get_next_compiler_invocation())
-			{
-				auto const index = *invocation_index;
-				auto const &invocation = compiler_invocations[index];
-				compilation_results[index] = run_command(invocation.compiler, invocation.args, true);
-				// unlock the mutex at the given index to signal that the process has finished
-				invocation_mutexes[index].unlock();
-			}
-		}));
-	}
+	auto pool = thread_pool(job_count);
+	auto compilation_result_futures = compiler_invocations.transform([&](auto const &invocation) {
+		return pool.push_task([&invocation]() { return run_command(invocation.compiler, invocation.args, true); });
+	}).collect<cppb::vector>();
 
 	int const index_width = [&]() {
 		auto i = compiler_invocations.size();
@@ -550,6 +510,8 @@ static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invoc
 		return result;
 	}();
 
+	auto compilation_results = cppb::vector<process_result>();
+	compilation_results.reserve(compilation_result_futures.size());
 	for (std::size_t i = 0; i < invocation_count; ++i)
 	{
 		auto const filename = fs::relative(compiler_invocations[i].input_file).generic_string();
@@ -561,11 +523,11 @@ static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invoc
 		}
 
 		// block until the process has finished running
-		invocation_mutexes[i].lock();
-		invocation_mutexes[i].unlock();
+		compilation_results.push_back(compilation_result_futures[i].get());
+		auto const &compilation_result = compilation_results.back();
 
 		// print the output of the compiler, if there is any
-		auto const output = compilation_results[i].stdout_string + compilation_results[i].stderr_string;
+		auto const output = compilation_result.stdout_string + compilation_result.stderr_string;
 		if (output != "")
 		{
 			if (output.ends_with('\n'))
