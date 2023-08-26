@@ -670,7 +670,7 @@ static void write_escaped_string(std::string &buffer, std::string_view str)
 
 #endif // windows
 
-std::string make_command_string(std::string_view command, std::span<std::string const> args)
+std::string make_command_string(std::string_view command, cppb::span<std::string const> args)
 {
 	std::string command_string = "";
 

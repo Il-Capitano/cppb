@@ -299,7 +299,7 @@ static run_rule_result_t run_rules(
 	return { 0, any_rules_run, last_update_time };
 }
 
-static void print_command(std::string_view executable, std::span<std::string const> arguments)
+static void print_command(std::string_view executable, cppb::span<std::string const> arguments)
 {
 	fmt::print("{}\n", make_command_string(executable, arguments));
 	std::fflush(stdout);
@@ -486,7 +486,7 @@ struct compilation_info_t
 	std::string filename;
 };
 
-static cppb::vector<process_result> run_commands_async(std::span<compiler_invocation_t const> compiler_invocations)
+static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invocation_t const> compiler_invocations)
 {
 	auto const invocation_count = compiler_invocations.size();
 
@@ -582,7 +582,7 @@ static cppb::vector<process_result> run_commands_async(std::span<compiler_invoca
 	return compilation_results;
 }
 
-static int run_commands_sequential(std::span<compiler_invocation_t const> compiler_invocations)
+static int run_commands_sequential(cppb::span<compiler_invocation_t const> compiler_invocations)
 {
 	int const index_width = [&]() {
 		auto i = compiler_invocations.size();

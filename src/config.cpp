@@ -426,7 +426,7 @@ struct config_object_pair
 
 static void resolve_project_config(
 	config_object_pair &config_object,
-	std::span<config_object_pair> configs,
+	cppb::span<config_object_pair> configs,
 	std::string &error
 )
 {

@@ -5,6 +5,8 @@
 #include <array>
 #include <filesystem>
 #include <string_view>
+#include <type_traits>
+#include <span>
 #include <fmt/format.h>
 
 #include "ranges/ranges.h"
@@ -32,16 +34,9 @@ struct array : std::array<T, N>, ranges::collection_base<array<T, N>>
 {};
 
 template<typename T>
-struct array_view : ranges::basic_range<T *, T *>
+struct span : std::span<T>, ranges::collection_base<span<T>>
 {
-	array_view()
-		: ranges::basic_range<T *, T *>(nullptr, nullptr)
-	{}
-
-	template<typename Range>
-	array_view(Range &&range)
-		: ranges::basic_range<T *, T *>(&*range.begin(), &*range.end())
-	{}
+	using std::span<T>::span;
 };
 
 } // namespace cppb

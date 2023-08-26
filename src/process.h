@@ -13,7 +13,7 @@ struct process_result
 	std::string stderr_string;
 };
 
-std::string make_command_string(std::string_view command, std::span<std::string const> args);
+std::string make_command_string(std::string_view command, cppb::span<std::string const> args);
 process_result run_command(std::string_view command, bool capture);
 process_result run_command(std::string_view executable, cppb::vector<std::string> const &arguments, bool capture);
 std::pair<std::string, bool> capture_command_output(std::string_view executable, cppb::vector<std::string> const &arguments);
