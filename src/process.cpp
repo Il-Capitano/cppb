@@ -260,25 +260,6 @@ static process_result run_process_with_capture(std::string_view command_line)
 
 	{
 		// stdout and stderr need to be read simultaneously, otherwise the buffer fills up, and blocks reads
-		auto stdout_reader_thread = std::jthread([&result, stdout_reader]() {
-			std::array<char, 1024> buffer = {};
-			while (true)
-			{
-				DWORD read_size = 0;
-				auto stdout_success = ReadFile(
-					stdout_reader,
-					buffer.data(),
-					static_cast<DWORD>(buffer.size()),
-					&read_size,
-					nullptr
-				);
-				if (!stdout_success || read_size == 0)
-				{
-					break;
-				}
-				result.stdout_string += std::string_view(buffer.data(), read_size);
-			}
-		});
 		auto stderr_reader_thread = std::jthread([&result, stderr_reader]() {
 			std::array<char, 1024> buffer = {};
 			while (true)
@@ -298,6 +279,24 @@ static process_result run_process_with_capture(std::string_view command_line)
 				result.stderr_string += std::string_view(buffer.data(), read_size);
 			}
 		});
+
+		std::array<char, 1024> buffer = {};
+		while (true)
+		{
+			DWORD read_size = 0;
+			auto stdout_success = ReadFile(
+				stdout_reader,
+				buffer.data(),
+				static_cast<DWORD>(buffer.size()),
+				&read_size,
+				nullptr
+			);
+			if (!stdout_success || read_size == 0)
+			{
+				break;
+			}
+			result.stdout_string += std::string_view(buffer.data(), read_size);
+		}
 	}
 
 	WaitForSingleObject(process_info.hProcess, INFINITE);
@@ -556,18 +555,6 @@ static process_result run_process(std::string_view command_line, bool capture)
 		if (capture)
 		{
 			// stdout and stderr need to be read simultaneously, otherwise the buffer fills up, and blocks reads
-			auto stdout_reader_thread = std::jthread([&result, stdout_read_pipe = stdout_pipe[PIPE_READ]]() {
-				std::array<char, 1024> buffer = {};
-				while (true)
-				{
-					auto const read_size = read(stdout_read_pipe, buffer.data(), buffer.size());
-					if (read_size == 0)
-					{
-						break;
-					}
-					result.stdout_string += std::string_view(buffer.data(), static_cast<size_t>(read_size));
-				}
-			});
 			auto stderr_reader_thread = std::jthread([&result, stderr_read_pipe = stderr_pipe[PIPE_READ]]() {
 				std::array<char, 1024> buffer = {};
 				while (true)
@@ -580,6 +567,18 @@ static process_result run_process(std::string_view command_line, bool capture)
 					result.stderr_string += std::string_view(buffer.data(), static_cast<size_t>(read_size));
 				}
 			});
+
+			auto const stdout_read_pipe = stdout_pipe[PIPE_READ];
+			std::array<char, 1024> buffer = {};
+			while (true)
+			{
+				auto const read_size = read(stdout_read_pipe, buffer.data(), buffer.size());
+				if (read_size == 0)
+				{
+					break;
+				}
+				result.stdout_string += std::string_view(buffer.data(), static_cast<size_t>(read_size));
+			}
 		}
 
 		int status;
