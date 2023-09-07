@@ -15,7 +15,7 @@
 
 			"include_paths": [],
 
-			"defines": [ "FMT_HEADER_ONLY" ],
+			"libraries": [ "fmt", "libcrypto" ],
 			"warnings": [
 				"everything",
 				"no-c++98-compat",

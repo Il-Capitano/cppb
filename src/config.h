@@ -122,7 +122,16 @@ struct config_file
 	cppb::vector<rule>           rules{};
 };
 
+struct output_file_info
+{
+	std::string compiler;
+	cppb::vector<std::string> args;
+	std::string hash;
+};
+
 config_file read_config_json(fs::path const &config_file_path, std::string &error);
+std::optional<output_file_info> read_output_file_info_json(fs::path const &file_info_json);
+void write_output_file_info_json(fs::path const &file_info_json, std::string_view compiler, cppb::span<std::string const> args, std::string_view hash);
 void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config);
 void add_cpp_compiler_flags(cppb::vector<std::string> &args, config const &config);
 void add_link_flags(cppb::vector<std::string> &args, config const &config);

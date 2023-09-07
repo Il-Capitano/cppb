@@ -974,6 +974,124 @@ config_file read_config_json(fs::path const &dep_file_path, std::string &error)
 	return result;
 }
 
+std::optional<output_file_info> read_output_file_info_json(fs::path const &file_info_json)
+{
+	std::ifstream input(file_info_json);
+	if (!input)
+	{
+		return std::nullopt;
+	}
+
+	rapidjson::IStreamWrapper input_wrapper(input);
+	rapidjson::Document document;
+	document.ParseStream(input_wrapper);
+
+	if (document.HasParseError())
+	{
+		return std::nullopt;
+	}
+
+	if (!document.IsObject())
+	{
+		return std::nullopt;
+	}
+
+	auto const object = document.GetObject();
+	auto result = output_file_info{};
+
+	auto const compiler_it = object.FindMember("compiler");
+	if (compiler_it == object.MemberEnd())
+	{
+		return std::nullopt;
+	}
+
+	if (!compiler_it->value.IsString())
+	{
+		return std::nullopt;
+	}
+
+	result.compiler = compiler_it->value.GetString();
+
+	auto const args_it = object.FindMember("args");
+	if (args_it == object.MemberEnd())
+	{
+		return std::nullopt;
+	}
+
+	if (!args_it->value.IsArray())
+	{
+		return std::nullopt;
+	}
+
+	for (auto const &arg : args_it->value.GetArray())
+	{
+		if (!arg.IsString())
+		{
+			return std::nullopt;
+		}
+
+		result.args.push_back(arg.GetString());
+	}
+
+	auto const hash_it = object.FindMember("hash");
+	if (hash_it == object.MemberEnd())
+	{
+		return std::nullopt;
+	}
+
+	if (!hash_it->value.IsString())
+	{
+		return std::nullopt;
+	}
+
+	result.hash = hash_it->value.GetString();
+
+	return std::move(result);
+}
+
+void write_output_file_info_json(
+	fs::path const &file_info_json,
+	std::string_view compiler,
+	cppb::span<std::string const> args,
+	std::string_view hash
+)
+{
+	rapidjson::Document document;
+	auto &object = document.SetObject();
+
+	object.AddMember(
+		"compiler",
+		rapidjson::Document::StringRefType(compiler.data(), static_cast<rapidjson::SizeType>(compiler.size())),
+		document.GetAllocator()
+	);
+	assert(object.FindMember("compiler")->value.IsString());
+
+	object.AddMember("args", {}, document.GetAllocator());
+	auto &args_array = object.FindMember("args")->value;
+	args_array.SetArray();
+	for (auto const &arg : args)
+	{
+		args_array.PushBack(
+			rapidjson::Document::StringRefType(arg.data(), static_cast<rapidjson::SizeType>(arg.size())),
+			document.GetAllocator()
+		);
+	}
+	assert(object.FindMember("args")->value.IsArray());
+
+	object.AddMember(
+		"hash",
+		rapidjson::Document::StringRefType(hash.data(), static_cast<rapidjson::SizeType>(hash.size())),
+		document.GetAllocator()
+	);
+	assert(object.FindMember("hash")->value.IsString());
+
+	fs::create_directories(file_info_json.parent_path());
+	auto output_file = std::ofstream(file_info_json);
+	auto output_wrapper = rapidjson::OStreamWrapper(output_file);
+	auto writer = rapidjson::Writer(output_wrapper);
+	document.Accept(writer);
+}
+
 void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config)
 {
 	switch (config.compiler)

@@ -1,12 +1,12 @@
-CXX_FLAGS := -std=c++20 $(shell pkg-config fmt --cflags) -O3
-LD_FLAGS := $(shell pkg-config fmt --libs)
+CXX_FLAGS := -std=c++20 $(shell pkg-config fmt libcrypto --cflags) -O3
+LD_FLAGS := $(shell pkg-config fmt libcrypto --libs)
 EXE :=
 
 RM := rm
 
 
-SOURCES := src/ctcli/ctcli.cpp src/analyze.cpp src/config.cpp src/main.cpp src/process.cpp
-HEADERS := src/ctcli/ctcli.h src/ranges/ranges.h src/analyze.h src/cl_options.h src/config.h src/core.h src/process.h
+SOURCES := src/ctcli/ctcli.cpp src/analyze.cpp src/config.cpp src/main.cpp src/process.cpp src/file_hash.cpp
+HEADERS := src/ctcli/ctcli.h src/ranges/ranges.h src/analyze.h src/cl_options.h src/config.h src/core.h src/process.h src/file_hash.h
 
 ifeq ($(OS),Windows_NT)
 	EXE += bin/cppb.exe

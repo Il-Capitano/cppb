@@ -13,8 +13,10 @@
 #include "process.h"
 #include "cl_options.h"
 #include "thread_pool.h"
+#include "file_hash.h"
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif // windows
 
@@ -481,13 +483,85 @@ struct compiler_invocation_t
 	fs::path output_file;
 };
 
+static fs::path get_output_file_info_json(fs::path const &cache_dir, fs::path const &output_file)
+{
+	fs::path result = cache_dir / fs::relative(output_file);
+	result += ".json";
+	return result;
+}
+
+static bool should_compile(
+	compiler_invocation_t const &invocation,
+	fs::path const &cache_dir,
+	fs::file_time_type pch_last_update = fs::file_time_type::min()
+)
+{
+	if (ctcli::option_value<"build --rebuild"> || !fs::exists(invocation.output_file))
+	{
+		return true;
+	}
+
+	auto const output_last_update = fs::last_write_time(invocation.output_file);
+	if (output_last_update < pch_last_update)
+	{
+		return true;
+	}
+
+	auto const input_last_update = invocation.input_file_last_modified;
+	if (output_last_update < input_last_update)
+	{
+		return true;
+	}
+
+	auto const output_file_info_json = get_output_file_info_json(cache_dir, invocation.output_file);
+	if (!fs::exists(output_file_info_json) || fs::last_write_time(output_file_info_json) < output_last_update)
+	{
+		return true;
+	}
+
+	auto const maybe_info = read_output_file_info_json(output_file_info_json);
+	if (!maybe_info)
+	{
+		return true;
+	}
+
+	auto const &info = *maybe_info;
+	auto const hash = hash_file(invocation.output_file);
+	return hash == ""
+		|| hash != info.hash
+		|| invocation.compiler != info.compiler
+		|| invocation.args != info.args;
+}
+
+static process_result compile(compiler_invocation_t const &invocation, fs::path const &cache_dir, bool capture)
+{
+	auto const output_file_info_json = get_output_file_info_json(cache_dir, invocation.output_file);
+	if (fs::exists(output_file_info_json))
+	{
+		fs::remove(output_file_info_json);
+	}
+
+	auto const result = run_command(invocation.compiler, invocation.args, capture);
+
+	if (result.exit_code == 0)
+	{
+		auto const hash = hash_file(invocation.output_file);
+		write_output_file_info_json(output_file_info_json, invocation.compiler, invocation.args, hash);
+	}
+
+	return result;
+}
+
 struct compilation_info_t
 {
 	std::size_t index;
 	std::string filename;
 };
 
-static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invocation_t const> compiler_invocations)
+static cppb::vector<process_result> run_commands_async(
+	cppb::span<compiler_invocation_t const> compiler_invocations,
+	fs::path const &cache_dir
+)
 {
 	auto const invocation_count = compiler_invocations.size();
 
@@ -496,7 +570,7 @@ static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invoc
 
 	auto pool = thread_pool(job_count);
 	auto compilation_result_futures = compiler_invocations.transform([&](auto const &invocation) {
-		return pool.push_task([&invocation]() { return run_command(invocation.compiler, invocation.args, true); });
+		return pool.push_task([&invocation, &cache_dir]() { return compile(invocation, cache_dir, true); });
 	}).collect<cppb::vector>();
 
 	int const index_width = [&]() {
@@ -544,7 +618,10 @@ static cppb::vector<process_result> run_commands_async(cppb::span<compiler_invoc
 	return compilation_results;
 }
 
-static int run_commands_sequential(cppb::span<compiler_invocation_t const> compiler_invocations)
+static int run_commands_sequential(
+	cppb::span<compiler_invocation_t const> compiler_invocations,
+	fs::path const &cache_dir
+)
 {
 	int const index_width = [&]() {
 		auto i = compiler_invocations.size();
@@ -568,7 +645,7 @@ static int run_commands_sequential(cppb::span<compiler_invocation_t const> compi
 			print_command(invocation.compiler, invocation.args);
 		}
 
-		auto const result = run_command(invocation.compiler, invocation.args, false);
+		auto const result = compile(invocation, cache_dir, false);
 		if (result.exit_code != 0)
 		{
 			return result.exit_code;
@@ -663,8 +740,7 @@ static std::optional<compiler_invocation_t> get_pch_compiler_invocation(
 static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
-	fs::path const &intermediate_bin_directory,
-	fs::file_time_type dependency_last_update
+	fs::path const &intermediate_bin_directory
 )
 {
 	project_compiler_invocations_t result;
@@ -721,34 +797,29 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 			auto const source_dir_size = std::distance(source_directory.begin(), source_directory.end());
 			auto const is_in_source_directory = source_size > source_dir_size
 				&& std::equal(source_directory.begin(), source_directory.end(), source.file_path.begin());
+			if (!is_in_source_directory)
+			{
+				return false;
+			}
+
 			auto const is_excluded = excluded_sources.is_any([&source, source_size](auto const &excluded_source) {
 				auto const excluded_source_size = std::distance(excluded_source.begin(), excluded_source.end());
 				return source_size > excluded_source_size
 					&& std::equal(excluded_source.begin(), excluded_source.end(), source.file_path.begin());
 			});
-			return is_in_source_directory && !is_excluded && source_extensions.is_any([&source](auto const extension) {
+			if (is_excluded)
+			{
+				return false;
+			}
+
+			return source_extensions.is_any([&source](auto const extension) {
 				return source.file_path.extension().generic_string() == extension;
 			});
 		}
 	).collect<cppb::vector>();
 
 	cppb::vector<compile_command> compile_commands;
-
-	auto const emit_compile_commands = (
-			ctcli::option_value<"build --build-mode"> == build_mode::debug
-			&& (ctcli::option_value<"build --emit-compile-commands"> || build_config.emit_compile_commands)
-		) && [&]() {
-			fs::path const compile_commands_json = "./compile_commands.json";
-			return !fs::exists(compile_commands_json)
-				|| fs::last_write_time(compile_commands_json) < source_files
-					.transform([](auto const &source) { return source.last_modified_time; })
-					.max(dependency_last_update);
-		}();
-
-	if (emit_compile_commands)
-	{
-		compile_commands.reserve(compilation_units.size());
-	}
+	compile_commands.reserve(compilation_units.size());
 
 	// source file compilation
 	for (std::size_t i = 0; i < compilation_units.size(); ++i)
@@ -778,19 +849,12 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 			.output_file = std::move(object_file),
 		});
 
-		if (emit_compile_commands)
-		{
-			compile_commands.push_back({ std::move(source_file_name), args });
-		}
-
+		compile_commands.push_back({ std::move(source_file_name), args });
 		args.resize(args_old_size);
 	}
 
-	if (compile_commands.size() != 0)
-	{
-		compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
-		write_compile_commands_json(compile_commands);
-	}
+	compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
+	write_compile_commands_json(compile_commands);
 
 	return std::move(result);
 }
@@ -799,10 +863,10 @@ static build_result_t build_project(
 	config const &build_config,
 	cppb::vector<source_file> const &source_files,
 	fs::path const &intermediate_bin_directory,
-	fs::file_time_type dependency_last_update
+	fs::path const &cache_dir
 )
 {
-	auto const invocations = get_compiler_invocations(build_config, source_files, intermediate_bin_directory, dependency_last_update);
+	auto const invocations = get_compiler_invocations(build_config, source_files, intermediate_bin_directory);
 	if (!invocations.has_value())
 	{
 		return {
@@ -818,14 +882,8 @@ static build_result_t build_project(
 
 	if (invocations->c_pch.has_value())
 	{
-		auto const header_last_modified = invocations->c_pch->input_file_last_modified;
 		auto const &pch_file = invocations->c_pch->output_file;
-		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
-		if (
-			ctcli::option_value<"build --rebuild">
-			|| pch_last_write_time < header_last_modified
-			|| pch_last_write_time < dependency_last_update
-		)
+		if (should_compile(*invocations->c_pch, cache_dir))
 		{
 			auto const relative_header_filename = fs::relative(invocations->c_pch->input_file).generic_string();
 			fmt::print("pre-compiling {}\n", relative_header_filename);
@@ -834,7 +892,7 @@ static build_result_t build_project(
 			{
 				print_command(invocations->c_pch->compiler, invocations->c_pch->args);
 			}
-			auto const result = run_command(invocations->c_pch->compiler, invocations->c_pch->args, false);
+			auto const result = compile(*invocations->c_pch, cache_dir, false);
 			if (result.exit_code != 0)
 			{
 				return { result.exit_code, false, false, {} };
@@ -847,14 +905,8 @@ static build_result_t build_project(
 	}
 	if (invocations->cpp_pch.has_value())
 	{
-		auto const header_last_modified = invocations->cpp_pch->input_file_last_modified;
 		auto const &pch_file = invocations->cpp_pch->output_file;
-		auto const pch_last_write_time = fs::exists(pch_file) ? fs::last_write_time(pch_file) : fs::file_time_type::min();
-		if (
-			ctcli::option_value<"build --rebuild">
-			|| pch_last_write_time < header_last_modified
-			|| pch_last_write_time < dependency_last_update
-		)
+		if (should_compile(*invocations->cpp_pch, cache_dir))
 		{
 			auto const relative_header_filename = fs::relative(invocations->cpp_pch->input_file).generic_string();
 			fmt::print("pre-compiling {}\n", relative_header_filename);
@@ -863,7 +915,7 @@ static build_result_t build_project(
 			{
 				print_command(invocations->cpp_pch->compiler, invocations->cpp_pch->args);
 			}
-			auto const result = run_command(invocations->cpp_pch->compiler, invocations->cpp_pch->args, false);
+			auto const result = compile(*invocations->cpp_pch, cache_dir, false);
 			if (result.exit_code != 0)
 			{
 				return { result.exit_code, false, false, {} };
@@ -877,14 +929,8 @@ static build_result_t build_project(
 
 	auto const compiler_invocations = invocations->translation_units
 		.filter([&](compiler_invocation_t const &invocation) {
-			auto const object_last_write_time = fs::exists(invocation.output_file)
-				? fs::last_write_time(invocation.output_file)
-				: fs::file_time_type::min();
 			auto const is_c_source = invocation.input_file.extension() == ".c";
-			return ctcli::option_value<"build --rebuild">
-				|| object_last_write_time < invocation.input_file_last_modified
-				|| object_last_write_time < dependency_last_update
-				|| object_last_write_time < (is_c_source ? c_pch_last_update : cpp_pch_last_update);
+			return should_compile(invocation, cache_dir, (is_c_source ? c_pch_last_update : cpp_pch_last_update));
 		})
 		.collect<cppb::vector>();
 
@@ -903,7 +949,7 @@ static build_result_t build_project(
 
 	if (!ctcli::option_value<"build -s"> && job_count > 1 && compiler_invocations.size() > 1)
 	{
-		cppb::vector<process_result> compilation_results = run_commands_async(compiler_invocations);
+		cppb::vector<process_result> compilation_results = run_commands_async(compiler_invocations, cache_dir);
 
 		bool is_good = true;
 		assert(compilation_results.size() == compiler_invocations.size());
@@ -964,12 +1010,12 @@ static build_result_t build_project(
 	}
 	else
 	{
-		auto const exit_code = run_commands_sequential(compiler_invocations);
+		auto const exit_code = run_commands_sequential(compiler_invocations, cache_dir);
 		return { exit_code, true, invocations->is_any_cpp, std::move(object_files) };
 	}
 }
 
-static int build_project(project_config const &project_config, cppb::vector<rule> const &rules, fs::file_time_type config_last_update)
+static int build_project(project_config const &project_config, cppb::vector<rule> const &rules, fs::path const &cache_dir, fs::file_time_type config_last_update)
 {
 	std::string error;
 
@@ -1042,13 +1088,11 @@ static int build_project(project_config const &project_config, cppb::vector<rule
 	});
 	write_dependency_json(dependency_file_path, source_files);
 
-	auto const build_dependency_last_update = config_last_update;
-
 	auto [exit_code, any_run, any_cpp, object_files] = build_project(
 		build_config,
 		source_files,
 		intermediate_bin_directory,
-		build_dependency_last_update
+		cache_dir
 	);
 	if (exit_code != 0)
 	{
@@ -1157,7 +1201,10 @@ static int build_command(void)
 		}
 		return *it;
 	}();
-	return build_project(project_config, rules, fs::last_write_time(config_file_path));
+
+	fs::path cache_dir = ctcli::option_value<"build --cppb-dir">;
+	cache_dir /= "cache";
+	return build_project(project_config, rules, cache_dir, fs::last_write_time(config_file_path));
 }
 
 static int run_command(void)
@@ -1190,7 +1237,11 @@ static int run_command(void)
 		}
 		return *it;
 	}();
-	auto const build_result = build_project(project_config, rules, fs::last_write_time(config_file_path));
+
+	fs::path cache_dir = ctcli::option_value<"build --cppb-dir">;
+	cache_dir /= "cache";
+	auto const build_result = build_project(project_config, rules, cache_dir, fs::last_write_time(config_file_path));
+
 	if (build_result != 0)
 	{
 		return build_result;
