@@ -927,12 +927,38 @@ static build_result_t build_project(
 		}
 	}
 
-	auto const compiler_invocations = invocations->translation_units
-		.filter([&](compiler_invocation_t const &invocation) {
-			auto const is_c_source = invocation.input_file.extension() == ".c";
-			return should_compile(invocation, cache_dir, (is_c_source ? c_pch_last_update : cpp_pch_last_update));
-		})
-		.collect<cppb::vector>();
+	auto const compiler_invocations = [&]() {
+		// somewhat arbitrary limit
+		if (invocations->translation_units.size() > 4)
+		{
+			auto pool = thread_pool(std::thread::hardware_concurrency());
+			auto futures = invocations->translation_units
+				.transform([&](compiler_invocation_t const &invocation) {
+					auto const is_c_source = invocation.input_file.extension() == ".c";
+					return pool.push_task([&, pch_last_update = is_c_source ? c_pch_last_update : cpp_pch_last_update]() {
+						return should_compile(invocation, cache_dir, pch_last_update);
+					});
+				})
+				.collect<cppb::vector>();
+			return ranges::iota(invocations->translation_units.size())
+				.filter([&](auto const i) {
+					return futures[i].get();
+				})
+				.transform([&](auto const i) -> auto const & {
+					return invocations->translation_units[i];
+				})
+				.collect<cppb::vector>();
+		}
+		else
+		{
+			return invocations->translation_units
+				.filter([&](compiler_invocation_t const &invocation) {
+					auto const is_c_source = invocation.input_file.extension() == ".c";
+					return should_compile(invocation, cache_dir, is_c_source ? c_pch_last_update : cpp_pch_last_update);
+				})
+				.collect<cppb::vector>();
+		}
+	}();
 
 	auto object_files = invocations->translation_units
 		.transform([](compiler_invocation_t const &invocation) {

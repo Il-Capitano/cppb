@@ -425,6 +425,16 @@ auto to_range(Range &&range) noexcept
 }
 
 template<typename T>
+auto iota(T end) noexcept
+{
+	return iota_range{
+		T(),
+		std::move(end)
+	};
+}
+
+
+template<typename T>
 auto iota(T begin, T end) noexcept
 {
 	return iota_range{
