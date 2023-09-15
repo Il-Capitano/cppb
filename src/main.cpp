@@ -854,7 +854,10 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 	}
 
 	compile_commands.sort([](auto const &lhs, auto const &rhs) { return lhs.source_file < rhs.source_file; });
-	write_compile_commands_json(compile_commands);
+	if (build_config.emit_compile_commands)
+	{
+		write_compile_commands_json(compile_commands);
+	}
 
 	return std::move(result);
 }
