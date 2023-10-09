@@ -25,6 +25,8 @@ struct config
 	cppb::vector<std::string> link_flags;
 	cppb::vector<std::string> libraries;
 
+	std::string output_name;
+
 	std::string llvm_config_path;
 
 	cppb::vector<std::string> run_args;
@@ -62,6 +64,8 @@ struct config_is_set
 	bool cpp_compiler_flags = false;
 	bool link_flags         = false;
 	bool libraries          = false;
+
+	bool output_name;
 
 	bool llvm_config_path = false;
 

@@ -159,6 +159,29 @@ static config const &get_build_config(project_config const &project_config)
 
 } // namespace os
 
+static std::string get_executable_name(std::string_view default_name, config const &build_config, std::string_view project_name)
+{
+	if (build_config.output_name != "")
+	{
+		if (build_config.output_name.ends_with(os::executable_extension))
+		{
+			return build_config.output_name;
+		}
+		else
+		{
+			return fmt::format("{}{}", build_config.output_name, os::executable_extension);
+		}
+	}
+	else if (project_name == "default")
+	{
+		return fmt::format("{}{}", default_name, os::executable_extension);
+	}
+	else
+	{
+		return fmt::format("{}-{}{}", project_name, default_name, os::executable_extension);
+	}
+}
+
 static uint64_t get_job_count(void)
 {
 	auto const result = ctcli::is_option_set<"build --jobs">()
@@ -429,9 +452,7 @@ static int link_project(
 	auto const cpp_compiler = get_cpp_compiler(build_config);
 
 	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = project_name == "default"
-		? fmt::format("{}{}", project_directory_name, os::executable_extension)
-		: fmt::format("{}-{}{}", project_name, project_directory_name, os::executable_extension);
+	auto const executable_file_name = get_executable_name(project_directory_name, build_config, project_name);
 
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 	auto const last_object_write_time = object_files
@@ -1183,9 +1204,7 @@ static int run_project(project_config const &project_config)
 	auto const bin_directory = fs::path(ctcli::option_value<"build --bin-dir">) / os::config_name();
 
 	auto const project_directory_name = fs::current_path().filename().generic_string();
-	auto const executable_file_name = project_config.project_name == "default"
-		? fmt::format("{}{}", project_directory_name, os::executable_extension)
-		: fmt::format("{}-{}{}", project_config.project_name, project_directory_name, os::executable_extension);
+	auto const executable_file_name = get_executable_name(project_directory_name, build_config, project_config.project_name);
 
 	auto const executable_file = fs::absolute(bin_directory / executable_file_name);
 

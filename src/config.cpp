@@ -315,6 +315,9 @@ fill_config_member<&config::member, &config_is_set::member>(object, #member, con
 	fill_array_config_member(libraries);
 	if (!error.empty()) { return; }
 
+	fill_regular_config_member(output_name);
+	if (!error.empty()) { return; }
+
 	fill_regular_config_member(llvm_config_path);
 	if (!error.empty()) { return; }
 
@@ -385,6 +388,8 @@ do { if (!values_is_set.member) { values.member = source_values.member; } } whil
 	fill_default_value(cpp_compiler_flags);
 	fill_default_value(link_flags);
 	fill_default_value(libraries);
+
+	fill_default_value(output_name);
 
 	fill_default_value(llvm_config_path);
 
@@ -1242,7 +1247,6 @@ R"({
 		result += R"(",
 			"excluded_sources": [],
 			"include_paths": [],
-			"library_paths": [],
 			"libraries": [],
 
 			"defines": [],
