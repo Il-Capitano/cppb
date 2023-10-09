@@ -804,7 +804,7 @@ static std::optional<project_compiler_invocations_t> get_compiler_invocations(
 
 			auto const is_excluded = excluded_sources.is_any([&source, source_size](auto const &excluded_source) {
 				auto const excluded_source_size = std::distance(excluded_source.begin(), excluded_source.end());
-				return source_size > excluded_source_size
+				return source_size >= excluded_source_size
 					&& std::equal(excluded_source.begin(), excluded_source.end(), source.file_path.begin());
 			});
 			if (is_excluded)
