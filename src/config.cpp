@@ -2,13 +2,9 @@
 #include "process.h"
 #include <filesystem>
 #include <fstream>
-#include <span>
-#include <rapidjson/document.h>
-#include <rapidjson/error/error.h>
-#include <rapidjson/writer.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/ostreamwrapper.h>
-#include <rapidjson/istreamwrapper.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 static cppb::vector<std::string> get_library_cflags(std::string_view library, config const &config)
 {
@@ -152,12 +148,12 @@ static cppb::vector<std::string> get_library_libs(std::string_view library, conf
 }
 
 template<auto config::*member, auto config_is_set::*is_set_member>
-static void fill_config_member(rapidjson::Value::ConstObject object, char const *name, config &config, config_is_set &config_is_set, std::string &error)
+static void fill_config_member(json const &object, char const *name, config &config, config_is_set &config_is_set, std::string &error)
 {
 	static_assert(member != nullptr);
 	static_assert(is_set_member != nullptr);
 
-	if (auto const it = object.FindMember(name); it != object.MemberEnd())
+	if (auto const it = object.find(name); it != object.end())
 	{
 		if constexpr (std::is_same_v<decltype(member), bool config::*>)
 		{
@@ -165,12 +161,12 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 			{
 				return;
 			}
-			if (!it->value.IsBool())
+			if (!it.value().is_boolean())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be a 'Bool'", name);
 				return;
 			}
-			config.*member = it->value.GetBool();
+			config.*member = it.value().get<bool>();
 			config_is_set.*is_set_member = true;
 		}
 		else if constexpr (
@@ -182,12 +178,12 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 			{
 				return;
 			}
-			if (!it->value.IsString())
+			if (!it.value().is_string())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be a 'String'", name);
 				return;
 			}
-			config.*member = it->value.GetString();
+			config.*member = it.value().get<std::string>();
 			config_is_set.*is_set_member = true;
 		}
 		else
@@ -196,20 +192,20 @@ static void fill_config_member(rapidjson::Value::ConstObject object, char const 
 				std::is_same_v<decltype(member), cppb::vector<fs::path> config::*>
 				|| std::is_same_v<decltype(member), cppb::vector<std::string> config::*>
 			);
-			if (!it->value.IsArray())
+			if (!it.value().is_array())
 			{
 				error = fmt::format("value of member '{}' in configuration file must be an 'Array'", name);
 				return;
 			}
-			auto const array = it->value.GetArray();
+			auto const &array = it.value();
 			for (auto const &elem : array)
 			{
-				if (!elem.IsString())
+				if (!elem.is_string())
 				{
 					error = fmt::format("array member in value of member '{}' in configuration file must be a 'String'", name);
 					return;
 				}
-				(config.*member).emplace_back(elem.GetString());
+				(config.*member).emplace_back(elem.get<std::string>());
 			}
 			config_is_set.*is_set_member = true;
 		}
@@ -227,18 +223,18 @@ static int parse_int(std::string_view str)
 	return result;
 }
 
-static void fill_config(rapidjson::Value::ConstObject object, config &config, config_is_set &config_is_set, std::string &error)
+static void fill_config(json const &object, config &config, config_is_set &config_is_set, std::string &error)
 {
 	if (!config_is_set.compiler)
 	{
-		if (auto const compiler_it = object.FindMember("compiler"); compiler_it != object.MemberEnd())
+		if (auto const compiler_it = object.find("compiler"); compiler_it != object.end())
 		{
-			if (!compiler_it->value.IsString())
+			if (!compiler_it.value().is_string())
 			{
 				error = "value of member 'compiler' in configuration file must be a 'String'";
 				return;
 			}
-			std::string_view const compiler = compiler_it->value.GetString();
+			auto const compiler = compiler_it.value().get<std::string_view>();
 			if (compiler.starts_with("gcc") || compiler.starts_with("g++") || compiler.starts_with("GCC"))
 			{
 				config.compiler = compiler_kind::gcc;
@@ -424,7 +420,7 @@ enum class resolve_state
 struct config_object_pair
 {
 	std::string_view name;
-	rapidjson::Value::ConstObject json_object;
+	json const &json_object;
 	project_config *config;
 	resolve_state state;
 };
@@ -453,11 +449,11 @@ static void resolve_project_config(
 
 	project_config *depends_on_config = nullptr;
 	if (
-		auto const depends_on_it = config_object.json_object.FindMember("depends_on");
-		depends_on_it != config_object.json_object.MemberEnd()
+		auto const depends_on_it = config_object.json_object.find("depends_on");
+		depends_on_it != config_object.json_object.end()
 	)
 	{
-		if (!depends_on_it->value.IsString())
+		if (!depends_on_it.value().is_string())
 		{
 			error = "value of member 'depends_on' in configuration file must be a 'String'";
 			config_object.state = resolve_state::error;
@@ -465,7 +461,7 @@ static void resolve_project_config(
 		}
 		auto const it = std::find_if(
 			configs.begin(), configs.end(),
-			[depends_on_name = depends_on_it->value.GetString()](auto const &config_) {
+			[depends_on_name = depends_on_it.value().get<std::string_view>()](auto const &config_) {
 				return config_.name == depends_on_name;
 			}
 		);
@@ -473,7 +469,7 @@ static void resolve_project_config(
 		{
 			error = fmt::format(
 				"invalid value '{}' for member 'depends_on', there's no such configuration",
-				depends_on_it->value.GetString()
+				depends_on_it.value().get<std::string_view>()
 			);
 			config_object.state = resolve_state::error;
 			return;
@@ -490,70 +486,70 @@ static void resolve_project_config(
 		depends_on_config = it->config;
 	}
 
-	if (auto const configs_it = object.FindMember("configs"); configs_it != object.MemberEnd())
+	if (auto const configs_it = object.find("configs"); configs_it != object.end())
 	{
-		if (!configs_it->value.IsObject())
+		if (!configs_it.value().is_object())
 		{
 			error = "value of member 'configs' in configuration file must be an 'Object'";
 			config_object.state = resolve_state::error;
 			return;
 		}
-		auto const configs_object = configs_it->value.GetObject();
+		auto const &configs_object = configs_it.value();
 
-		if (auto const windows_it = configs_object.FindMember("windows-debug"); windows_it != configs_object.MemberEnd())
+		if (auto const windows_it = configs_object.find("windows-debug"); windows_it != configs_object.end())
 		{
-			if (!windows_it->value.IsObject())
+			if (!windows_it.value().is_object())
 			{
 				error = "value of member 'windows-debug' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
+			fill_config(windows_it.value(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
 		}
-		if (auto const windows_it = configs_object.FindMember("windows-release"); windows_it != configs_object.MemberEnd())
+		if (auto const windows_it = configs_object.find("windows-release"); windows_it != configs_object.end())
 		{
-			if (!windows_it->value.IsObject())
+			if (!windows_it.value().is_object())
 			{
 				error = "value of member 'windows-release' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
+			fill_config(windows_it.value(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
 		}
-		if (auto const windows_it = configs_object.FindMember("linux-debug"); windows_it != configs_object.MemberEnd())
+		if (auto const windows_it = configs_object.find("linux-debug"); windows_it != configs_object.end())
 		{
-			if (!windows_it->value.IsObject())
+			if (!windows_it.value().is_object())
 			{
 				error = "value of member 'linux-debug' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
+			fill_config(windows_it.value(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
 		}
-		if (auto const windows_it = configs_object.FindMember("linux-release"); windows_it != configs_object.MemberEnd())
+		if (auto const windows_it = configs_object.find("linux-release"); windows_it != configs_object.end())
 		{
-			if (!windows_it->value.IsObject())
+			if (!windows_it.value().is_object())
 			{
 				error = "value of member 'linux-release' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
+			fill_config(windows_it.value(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
@@ -561,42 +557,42 @@ static void resolve_project_config(
 			}
 		}
 
-		if (auto const debug_it = configs_object.FindMember("debug"); debug_it != configs_object.MemberEnd())
+		if (auto const debug_it = configs_object.find("debug"); debug_it != configs_object.end())
 		{
-			if (!debug_it->value.IsObject())
+			if (!debug_it.value().is_object())
 			{
 				error = "value of member 'debug' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(debug_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
+			fill_config(debug_it.value(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(debug_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
+			fill_config(debug_it.value(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
 		}
-		if (auto const release_it = configs_object.FindMember("release"); release_it != configs_object.MemberEnd())
+		if (auto const release_it = configs_object.find("release"); release_it != configs_object.end())
 		{
-			if (!release_it->value.IsObject())
+			if (!release_it.value().is_object())
 			{
 				error = "value of member 'release' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(release_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
+			fill_config(release_it.value(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(release_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
+			fill_config(release_it.value(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
@@ -604,42 +600,42 @@ static void resolve_project_config(
 			}
 		}
 
-		if (auto const windows_it = configs_object.FindMember("windows"); windows_it != configs_object.MemberEnd())
+		if (auto const windows_it = configs_object.find("windows"); windows_it != configs_object.end())
 		{
-			if (!windows_it->value.IsObject())
+			if (!windows_it.value().is_object())
 			{
 				error = "value of member 'windows' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.windows_debug, is_set.windows_debug, error);
+			fill_config(windows_it.value(), config.windows_debug, is_set.windows_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(windows_it->value.GetObject(), config.windows_release, is_set.windows_release, error);
+			fill_config(windows_it.value(), config.windows_release, is_set.windows_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
 		}
-		if (auto const linux_it = configs_object.FindMember("linux"); linux_it != configs_object.MemberEnd())
+		if (auto const linux_it = configs_object.find("linux"); linux_it != configs_object.end())
 		{
-			if (!linux_it->value.IsObject())
+			if (!linux_it.value().is_object())
 			{
 				error = "value of member 'linux' in configuration file must be an 'Object'";
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(linux_it->value.GetObject(), config.linux_debug, is_set.linux_debug, error);
+			fill_config(linux_it.value(), config.linux_debug, is_set.linux_debug, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
 				return;
 			}
-			fill_config(linux_it->value.GetObject(), config.linux_release, is_set.linux_release, error);
+			fill_config(linux_it.value(), config.linux_release, is_set.linux_release, error);
 			if (!error.empty())
 			{
 				config_object.state = resolve_state::error;
@@ -707,23 +703,18 @@ static void resolve_project_config(
 	}
 }
 
-static cppb::vector<project_config> get_project_configs(rapidjson::Document::Object object, std::string &error)
+static cppb::vector<project_config> get_project_configs(json const &object, std::string &error)
 {
 	cppb::vector<config_object_pair> config_objects = [&]() {
 		cppb::vector<config_object_pair> result;
-		auto const begin = object.begin();
-		auto const end   = object.end();
-		for (auto it = begin; it != end; ++it)
+		for (auto const &[key, value] : object.items())
 		{
-			auto const &member = *it;
-			assert(member.name.IsString());
-			std::string_view const name = member.name.GetString();
-			if (!member.value.IsObject())
+			if (!value.is_object())
 			{
-				error = fmt::format("configuration value for member '{}' must be an 'Object'", name);
+				error = fmt::format("configuration value for member '{}' must be an 'Object'", key);
 				return result;
 			}
-			result.push_back({ name, member.value.GetObject(), nullptr, resolve_state::none });
+			result.push_back({ key, value, nullptr, resolve_state::none });
 		}
 		return result;
 	}();
@@ -751,39 +742,39 @@ static cppb::vector<project_config> get_project_configs(rapidjson::Document::Obj
 	return result;
 }
 
-static cppb::vector<std::string> get_string_array(rapidjson::Document::Array array, std::string &error)
+static cppb::vector<std::string> get_string_array(json const &array, std::string &error)
 {
 	cppb::vector<std::string> result;
-	result.reserve(array.Size());
+	result.reserve(array.size());
 	for (auto const &element : array)
 	{
-		if (!element.IsString())
+		if (!element.is_string())
 		{
 			error = "array element must be a 'String'";
 			return {};
 		}
-		result.push_back(element.GetString());
+		result.push_back(element.get<std::string>());
 	}
 
 	return result;
 }
 
-static os_specific_rule get_os_specific_rule(rapidjson::Document::Object object, std::string &error)
+static os_specific_rule get_os_specific_rule(json const &object, std::string &error)
 {
 	os_specific_rule result;
 
-	auto const end = object.MemberEnd();
+	auto const end = object.end();
 	// dependencies
 
-	auto const dependencies_it = object.FindMember("dependencies");
+	auto const dependencies_it = object.find("dependencies");
 	if (dependencies_it != end)
 	{
-		if (!dependencies_it->value.IsArray())
+		if (!dependencies_it.value().is_array())
 		{
 			error = "value for member 'dependencies' must be an 'Array'";
 			return {};
 		}
-		result.dependencies = get_string_array(dependencies_it->value.GetArray(), error);
+		result.dependencies = get_string_array(dependencies_it.value(), error);
 		if (!error.empty())
 		{
 			return {};
@@ -791,8 +782,8 @@ static os_specific_rule get_os_specific_rule(rapidjson::Document::Object object,
 	}
 
 	// command or commands
-	auto const command_it = object.FindMember("command");
-	auto const commands_it = object.FindMember("commands");
+	auto const command_it = object.find("command");
+	auto const commands_it = object.find("commands");
 	if (command_it != end && commands_it != end)
 	{
 		error = "only one of 'command' or 'commands' may be provided in a rule";
@@ -800,21 +791,21 @@ static os_specific_rule get_os_specific_rule(rapidjson::Document::Object object,
 	}
 	else if (command_it != end)
 	{
-		if (!command_it->value.IsString())
+		if (!command_it.value().is_string())
 		{
 			error = "value for member 'command' must be a 'String'";
 			return {};
 		}
-		result.commands.push_back(command_it->value.GetString());
+		result.commands.push_back(command_it.value().get<std::string>());
 	}
 	else if (commands_it != end)
 	{
-		if (!commands_it->value.IsArray())
+		if (!commands_it.value().is_array())
 		{
 			error = "value for member 'commands' must be an 'Array'";
 			return {};
 		}
-		result.commands = get_string_array(commands_it->value.GetArray(), error);
+		result.commands = get_string_array(commands_it.value(), error);
 		if (!error.empty())
 		{
 			return {};
@@ -822,35 +813,35 @@ static os_specific_rule get_os_specific_rule(rapidjson::Document::Object object,
 	}
 
 	// is_file
-	auto const is_file_it = object.FindMember("is_file");
+	auto const is_file_it = object.find("is_file");
 	if (is_file_it != end)
 	{
-		if (!is_file_it->value.IsBool())
+		if (!is_file_it.value().is_boolean())
 		{
 			error = "value for member 'is_file' must be a 'Bool'";
 			return {};
 		}
-		result.is_file = is_file_it->value.GetBool();
+		result.is_file = is_file_it.value().get<bool>();
 	}
 
 	return result;
 }
 
-static rule get_rule(std::string_view name, rapidjson::Document::Object object, std::string &error)
+static rule get_rule(std::string_view name, json const &object, std::string &error)
 {
 	rule result;
 	result.rule_name = name;
 
-	auto const windows_it = object.FindMember("windows");
-	auto const linux_it = object.FindMember("linux");
-	if (windows_it == object.MemberEnd() && linux_it == object.MemberEnd())
+	auto const windows_it = object.find("windows");
+	auto const linux_it = object.find("linux");
+	if (windows_it == object.end() && linux_it == object.end())
 	{
 		result.windows_rule = get_os_specific_rule(object, error);
 		result.linux_rule = result.windows_rule;
 	}
-	else if (windows_it == object.MemberEnd() || linux_it == object.MemberEnd())
+	else if (windows_it == object.end() || linux_it == object.end())
 	{
-		if (windows_it == object.MemberEnd())
+		if (windows_it == object.end())
 		{
 			error = "member 'windows' must be specified when 'linux' is also specified";
 		}
@@ -862,46 +853,41 @@ static rule get_rule(std::string_view name, rapidjson::Document::Object object, 
 	}
 	else
 	{
-		if (!windows_it->value.IsObject())
+		if (!windows_it.value().is_object())
 		{
 			error = "value for member 'windows' must be an 'Object'";
 			return {};
 		}
-		if (!linux_it->value.IsObject())
+		if (!linux_it.value().is_object())
 		{
 			error = "value for member 'windows' must be an 'Object'";
 			return {};
 		}
 
-		auto const windows_object = windows_it->value.GetObject();
+		auto const &windows_object = windows_it.value();
 		result.windows_rule = get_os_specific_rule(windows_object, error);
 
-		auto const linux_object = linux_it->value.GetObject();
+		auto const &linux_object = linux_it.value();
 		result.linux_rule = get_os_specific_rule(linux_object, error);
 	}
 
 	return result;
 }
 
-static cppb::vector<rule> get_rules(rapidjson::Document::Object object, std::string &error)
+static cppb::vector<rule> get_rules(json const &object, std::string &error)
 {
 	cppb::vector<rule> result;
 
-	result.reserve(object.MemberCount());
-	auto it = object.MemberBegin();
-	auto const end = object.MemberEnd();
-	for (; it != end; ++it)
+	result.reserve(object.size());
+	for (auto const &[key, value] : object.items())
 	{
-		auto &[name, value] = *it;
-
-		assert(name.IsString());
-		if (!value.IsObject())
+		if (!value.is_object())
 		{
 			error = "array element in 'rules' must be an 'Object'";
 			return {};
 		}
 
-		result.push_back(get_rule(name.GetString(), value.GetObject(), error));
+		result.push_back(get_rule(key, value, error));
 		if (!error.empty())
 		{
 			return {};
@@ -920,57 +906,48 @@ config_file read_config_json(fs::path const &dep_file_path, std::string &error)
 		return {};
 	}
 
-	rapidjson::IStreamWrapper input_wrapper(input);
-	rapidjson::Document document;
-	document.ParseStream(input_wrapper);
+	auto object = json::parse(input);
 
-	if (document.HasParseError())
-	{
-		error = fmt::format("an error occurred while parsing '{}'", dep_file_path.generic_string());
-		return {};
-	}
-
-	if (!document.IsObject())
+	if (!object.is_object())
 	{
 		error = "top level value in configuration file must be an 'Object'";
 		return {};
 	}
 
-	auto const object = document.GetObject();
 	auto result = config_file{};
 
-	auto const projects_object_it = object.FindMember("projects");
-	if (projects_object_it == object.MemberEnd())
+	auto const projects_object_it = object.find("projects");
+	if (projects_object_it == object.end())
 	{
 		error = "unable to find 'projects' field in configuration file";
 		return {};
 	}
 
-	if (!projects_object_it->value.IsObject())
+	if (!projects_object_it.value().is_object())
 	{
 		error = "configuration value for member 'projects' must be an 'Object'";
 		return {};
 	}
 
-	result.projects = get_project_configs(projects_object_it->value.GetObject(), error);
+	result.projects = get_project_configs(projects_object_it.value(), error);
 	if (!error.empty())
 	{
 		return {};
 	}
 
-	auto const rules_object_it = object.FindMember("rules");
-	if (rules_object_it == object.MemberEnd())
+	auto const rules_object_it = object.find("rules");
+	if (rules_object_it == object.end())
 	{
 		return result;
 	}
 
-	if (!rules_object_it->value.IsObject())
+	if (!rules_object_it.value().is_object())
 	{
 		error = "configuration value for member 'rules' must be an 'Object'";
 		return {};
 	}
 
-	result.rules = get_rules(rules_object_it->value.GetObject(), error);
+	result.rules = get_rules(rules_object_it.value(), error);
 	if (!error.empty())
 	{
 		return {};
@@ -987,69 +964,60 @@ std::optional<output_file_info> read_output_file_info_json(fs::path const &file_
 		return std::nullopt;
 	}
 
-	rapidjson::IStreamWrapper input_wrapper(input);
-	rapidjson::Document document;
-	document.ParseStream(input_wrapper);
-
-	if (document.HasParseError())
+	auto object = json::parse(input);
+	if (!object.is_object())
 	{
 		return std::nullopt;
 	}
 
-	if (!document.IsObject())
-	{
-		return std::nullopt;
-	}
-
-	auto const object = document.GetObject();
 	auto result = output_file_info{};
 
-	auto const compiler_it = object.FindMember("compiler");
-	if (compiler_it == object.MemberEnd())
+	auto const compiler_it = object.find("compiler");
+	if (compiler_it == object.end())
 	{
 		return std::nullopt;
 	}
 
-	if (!compiler_it->value.IsString())
+	if (!compiler_it.value().is_string())
 	{
 		return std::nullopt;
 	}
 
-	result.compiler = compiler_it->value.GetString();
+	result.compiler = compiler_it.value().get<std::string>();
 
-	auto const args_it = object.FindMember("args");
-	if (args_it == object.MemberEnd())
+	auto const args_it = object.find("args");
+	if (args_it == object.end())
 	{
 		return std::nullopt;
 	}
 
-	if (!args_it->value.IsArray())
+	if (!args_it.value().is_array())
 	{
 		return std::nullopt;
 	}
 
-	for (auto const &arg : args_it->value.GetArray())
+	for (auto const &arg : args_it.value())
 	{
-		if (!arg.IsString())
+		if (!arg.is_string())
 		{
 			return std::nullopt;
 		}
 
-		result.args.push_back(arg.GetString());
+		result.args.push_back(arg.get<std::string>());
 	}
 
-	auto const hash_it = object.FindMember("hash");
-	if (hash_it == object.MemberEnd())
+	auto const hash_it = object.find("hash");
+	if (hash_it == object.end())
 	{
 		return std::nullopt;
 	}
 
-	if (!hash_it->value.IsString())
+	if (!hash_it.value().is_string())
 	{
 		return std::nullopt;
 	}
 
-	result.hash = hash_it->value.GetString();
+	result.hash = hash_it.value().get<std::string>();
 
 	return std::move(result);
 }
@@ -1061,40 +1029,22 @@ void write_output_file_info_json(
 	std::string_view hash
 )
 {
-	rapidjson::Document document;
-	auto &object = document.SetObject();
+	auto object = json::object();
 
-	object.AddMember(
-		"compiler",
-		rapidjson::Document::StringRefType(compiler.data(), static_cast<rapidjson::SizeType>(compiler.size())),
-		document.GetAllocator()
-	);
-	assert(object.FindMember("compiler")->value.IsString());
+	object["compiler"] = compiler;
 
-	object.AddMember("args", {}, document.GetAllocator());
-	auto &args_array = object.FindMember("args")->value;
-	args_array.SetArray();
+	auto args_json = json::array();
 	for (auto const &arg : args)
 	{
-		args_array.PushBack(
-			rapidjson::Document::StringRefType(arg.data(), static_cast<rapidjson::SizeType>(arg.size())),
-			document.GetAllocator()
-		);
+		args_json.push_back(arg);
 	}
-	assert(object.FindMember("args")->value.IsArray());
+	object["args"] = std::move(args_json);
 
-	object.AddMember(
-		"hash",
-		rapidjson::Document::StringRefType(hash.data(), static_cast<rapidjson::SizeType>(hash.size())),
-		document.GetAllocator()
-	);
-	assert(object.FindMember("hash")->value.IsString());
+	object["hash"] = hash;
 
 	fs::create_directories(file_info_json.parent_path());
 	auto output_file = std::ofstream(file_info_json);
-	auto output_wrapper = rapidjson::OStreamWrapper(output_file);
-	auto writer = rapidjson::Writer(output_wrapper);
-	document.Accept(writer);
+	output_file << object.dump();
 }
 
 void add_c_compiler_flags(cppb::vector<std::string> &args, config const &config)

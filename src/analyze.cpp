@@ -4,13 +4,9 @@
 #include <iterator>
 #include <cassert>
 #include <string_view>
-#include <functional>
-#include <rapidjson/document.h>
-#include <rapidjson/error/error.h>
-#include <rapidjson/writer.h>
-#include <rapidjson/prettywriter.h>
-#include <rapidjson/ostreamwrapper.h>
-#include <rapidjson/istreamwrapper.h>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
 
 struct include_file
 {
@@ -360,26 +356,17 @@ void fill_last_modified_times(cppb::vector<source_file> &sources)
 
 void write_dependency_json(fs::path const &output_path, cppb::vector<source_file> const &sources)
 {
-	rapidjson::Document d;
-	d.SetObject();
-	auto object = d.GetObject();
-	sources.for_each([&](auto const &source) {
-		rapidjson::Value value;
-		value.SetArray();
-		assert(value.IsArray());
-		auto array = value.GetArray();
-		source.dependencies.for_each([&](auto const &dep) {
-			array.PushBack(
-				rapidjson::Value(dep.generic_string().c_str(), d.GetAllocator()),
-				d.GetAllocator()
-			);
-		});
-		object.AddMember(
-			rapidjson::Value(source.file_path.generic_string().c_str(), d.GetAllocator()),
-			std::move(value),
-			d.GetAllocator()
-		);
-	});
+	auto dependencies_json = json::object();
+
+	for (auto const &source : sources)
+	{
+		auto value = json::array();
+		for (auto const &dep : source.dependencies)
+		{
+			value.push_back(dep.generic_string());
+		}
+		dependencies_json[source.file_path.generic_string()] = std::move(value);
+	}
 
 	fs::create_directories(output_path.parent_path());
 	std::ofstream output(output_path);
@@ -388,10 +375,7 @@ void write_dependency_json(fs::path const &output_path, cppb::vector<source_file
 		return;
 	}
 
-	rapidjson::OStreamWrapper output_wrapper(output);
-
-	rapidjson::PrettyWriter writer(output_wrapper);
-	d.Accept(writer);
+	output << dependencies_json.dump(1, '\t');
 }
 
 cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, std::string &error)
@@ -402,17 +386,9 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 		return {};
 	}
 
-	rapidjson::IStreamWrapper input_wrapper(input);
-	rapidjson::Document d;
-	d.ParseStream(input_wrapper);
+	auto dependencies_json = json::parse(input);
 
-	if (d.HasParseError())
-	{
-		error = fmt::format("an error occurred while parsing '{}'", dep_file_path.generic_string());
-		return {};
-	}
-
-	if (!d.IsObject())
+	if (!dependencies_json.is_object())
 	{
 		error = "top level value in dependency file must be an 'Object'";
 		return {};
@@ -420,37 +396,31 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 
 	cppb::vector<source_file> result;
 
-	auto object = d.GetObject();
-	// bullshit iteration because of C++20 breaking things with operator <=>
-	auto const begin = object.begin();
-	auto const end   = object.end();
-	for (auto it = begin; it.operator->() != end.operator->(); ++it)
+	for (auto const &member : dependencies_json.items())
 	{
-		auto const &member = *it;
-		assert(member.name.IsString());
-		std::string_view const name = member.name.GetString();
-		auto name_path = fs::path(name).lexically_normal();
+		std::string_view const key = member.key();
+		auto name_path = fs::path(key).lexically_normal();
 
 		if (!fs::exists(name_path))
 		{
 			continue;
 		}
-		if (!member.value.IsArray())
+		if (!member.value().is_array())
 		{
-			error = fmt::format("value of member '{}' in dependency file must be an 'Array'", name);
+			error = fmt::format("value of member '{}' in dependency file must be an 'Array'", key);
 			return {};
 		}
-		auto value_array = member.value.GetArray();
+		auto &value_array = member.value();
 		cppb::vector<fs::path> dependencies;
-		dependencies.reserve(value_array.Size());
+		dependencies.reserve(value_array.size());
 		for (auto const &value : value_array)
 		{
-			if (!value.IsString())
+			if (!value.is_string())
 			{
-				error = fmt::format("array element in value of member '{}' in dependency file must be a 'String'", name);
+				error = fmt::format("array element in value of member '{}' in dependency file must be a 'String'", key);
 				return {};
 			}
-			auto path = fs::path(value.GetString()).lexically_normal();
+			auto path = fs::path(value.get<std::string>()).lexically_normal();
 			if (fs::exists(path))
 			{
 				dependencies.emplace_back(std::move(path));
@@ -464,53 +434,33 @@ cppb::vector<source_file> read_dependency_json(fs::path const &dep_file_path, st
 
 void write_compile_commands_json(cppb::vector<compile_command> const &compile_commands)
 {
-	rapidjson::Document d;
-	d.SetArray();
-	assert(d.IsArray());
-	auto array = d.GetArray();
+	auto compile_commands_json = json::array();
+
 	auto const directory = fs::current_path().generic_string();
 
 	for (auto const &command : compile_commands)
 	{
-		rapidjson::Value value;
-		value.SetObject();
-		auto object = value.GetObject();
+		auto value = json::object();
 
-		object.AddMember(
-			"directory",
-			rapidjson::Value(directory.c_str(), d.GetAllocator()),
-			d.GetAllocator()
-		);
-		object.AddMember(
-			"file",
-			rapidjson::Value(command.source_file.c_str(), d.GetAllocator()),
-			d.GetAllocator()
-		);
-		rapidjson::Value args;
-		args.SetArray();
-		auto args_array = args.GetArray();
+		value["directory"] = directory;
+		value["file"] = command.source_file;
+
+		auto args = json::array();
 		for (auto const &arg : command.args)
 		{
-			args_array.PushBack(rapidjson::Value(arg.c_str(), d.GetAllocator()), d.GetAllocator());
+			args.push_back(arg);
 		}
-		object.AddMember(
-			"arguments",
-			std::move(args),
-			d.GetAllocator()
-		);
+		value["arguments"] = std::move(args);
 
-		array.PushBack(std::move(value), d.GetAllocator());
+		compile_commands_json.push_back(std::move(value));
 	}
 
 	std::ofstream output("./compile_commands.json");
 	if (!output.is_open())
 	{
-		fmt::print("error while writing compile_commands.json");
+		fmt::print(stderr, "error while writing compile_commands.json");
 		return;
 	}
 
-	rapidjson::OStreamWrapper output_wrapper(output);
-
-	rapidjson::PrettyWriter writer(output_wrapper);
-	d.Accept(writer);
+	output << compile_commands_json.dump(1, '\t');
 }

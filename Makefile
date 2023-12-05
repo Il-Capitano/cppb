@@ -1,5 +1,5 @@
-CXX_FLAGS := -std=c++20 $(shell pkg-config fmt libcrypto --cflags) -O3
-LD_FLAGS := $(shell pkg-config fmt libcrypto --libs)
+CXX_FLAGS := -std=c++20 $(shell pkg-config fmt libcrypto nlohmann_json --cflags) -O3
+LD_FLAGS := $(shell pkg-config fmt libcrypto nlohmann_json --libs)
 EXE :=
 
 RM := rm

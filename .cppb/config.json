@@ -15,7 +15,7 @@
 
 			"include_paths": [],
 
-			"libraries": [ "fmt", "libcrypto" ],
+			"libraries": [ "fmt", "libcrypto", "nlohmann_json" ],
 			"warnings": [
 				"everything",
 				"no-c++98-compat",
