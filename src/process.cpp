@@ -450,15 +450,12 @@ struct pipe_closer
 {
 	pipe_closer(int pipe_id)
 		: _pipe_id(pipe_id),
-		  _closed(false)
+		  _closed(pipe_id == -1)
 	{}
 
 	~pipe_closer(void)
 	{
-		if (!this->_closed)
-		{
-			close(this->_pipe_id);
-		}
+		this->reset();
 	}
 
 	pipe_closer(pipe_closer const &other) = delete;
@@ -468,8 +465,11 @@ struct pipe_closer
 
 	void reset(void)
 	{
-		close(this->_pipe_id);
-		this->_closed = true;
+		if (!this->_closed)
+		{
+			close(this->_pipe_id);
+			this->_closed = true;
+		}
 	}
 
 private:
@@ -484,8 +484,8 @@ static process_result run_process(std::string_view command_line, bool capture)
 	static constexpr size_t PIPE_READ = 0;
 	static constexpr size_t PIPE_WRITE = 1;
 
-	int stdout_pipe[2];
-	int stderr_pipe[2];
+	int stdout_pipe[2] = { -1, -1 };
+	int stderr_pipe[2] = { -1, -1 };
 
 	if (capture && pipe(stdout_pipe) < 0)
 	{
