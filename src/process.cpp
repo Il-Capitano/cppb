@@ -582,13 +582,13 @@ static process_result run_process(std::string_view command_line, bool capture)
 		}
 
 		int status;
-		if (waitpid(id, &status, 0) < 0)
+		if (waitpid(id, &status, 0) < 0 || !WIFEXITED(status))
 		{
 			result.exit_code = -1;
 		}
 		else
 		{
-			result.exit_code = status;
+			result.exit_code = WEXITSTATUS(status);
 		}
 	}
 	else
